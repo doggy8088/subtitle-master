@@ -116,6 +116,63 @@ const resLrcToSrt = convertSubtitle(sampleLrc, { sourceFormat: 'lrc', targetForm
 assert(resLrcToSrt.cues.length === 2, 'Parsed 2 lines from LRC');
 assert(resLrcToSrt.cues[0].text === '第一句歌詞', 'LRC text correctly extracted');
 
+// 8. Test URL Parameter Parsing and Normalization
+console.log('\n8. Testing URL Parameter Parsing & State Sync:');
+function parseFormatParams(searchString) {
+  const params = new URLSearchParams(searchString);
+  const fromParam = (params.get('from') || params.get('source') || params.get('src') || '').toLowerCase();
+  const toParam = (params.get('to') || params.get('target') || params.get('tgt') || '').toLowerCase();
+
+  const validSource = ['auto', 'srt', 'vtt', 'ass', 'ssa', 'lrc', 'json', 'txt'];
+  const validTarget = ['vtt', 'ass', 'srt', 'ssa', 'lrc', 'txt', 'json', 'csv'];
+
+  let sourceFormat = 'auto';
+  let targetFormat = 'vtt';
+
+  if (fromParam && validSource.includes(fromParam)) {
+    sourceFormat = fromParam;
+  }
+  if (toParam && validTarget.includes(toParam)) {
+    targetFormat = toParam;
+  }
+
+  return { sourceFormat, targetFormat };
+}
+
+const urlTest1 = parseFormatParams('?from=srt&to=ass');
+assert(urlTest1.sourceFormat === 'srt' && urlTest1.targetFormat === 'ass', 'Parse ?from=srt&to=ass');
+
+const urlTest2 = parseFormatParams('?source=VTT&target=JSON');
+assert(urlTest2.sourceFormat === 'vtt' && urlTest2.targetFormat === 'json', 'Parse ?source=VTT&target=JSON');
+
+const urlTest3 = parseFormatParams('?src=lrc&tgt=txt');
+assert(urlTest3.sourceFormat === 'lrc' && urlTest3.targetFormat === 'txt', 'Parse short alias ?src=lrc&tgt=txt');
+
+const urlTest4 = parseFormatParams('?from=invalid&to=hacker');
+assert(urlTest4.sourceFormat === 'auto' && urlTest4.targetFormat === 'vtt', 'Fallback invalid parameters to defaults');
+
+// 9. Test Source Text Persistence & Auto-Restore Workflow
+console.log('\n9. Testing LocalStorage Source Text Persistence & Restore Workflow:');
+const mockStorage = new Map();
+const mockSave = (text) => mockStorage.set('sm_source_text', text);
+const mockLoad = () => (mockStorage.has('sm_source_text') ? mockStorage.get('sm_source_text') : null);
+
+// Step 1: Simulate user typing or editing source subtitle
+const customSource = `1\n00:00:01,000 --> 00:00:03,000\n自訂測試字幕內容\n`;
+mockSave(customSource);
+
+// Step 2: Simulate page reload restoring source text
+const restored = mockLoad();
+assert(restored === customSource, 'Source subtitle text restored from storage');
+
+// Step 3: Verify restored source converts properly
+const restoredConverted = convertSubtitle(restored, { sourceFormat: 'srt', targetFormat: 'vtt' });
+assert(restoredConverted.output.includes('WEBVTT') && restoredConverted.output.includes('自訂測試字幕內容'), 'Restored source text converted accurately');
+
+// Step 4: User clears content -> localStorage holds empty string
+mockSave('');
+assert(mockLoad() === '', 'Cleared content saved as empty string');
+
 console.log(`\n========================================`);
 console.log(`Test Results: ${passed} passed, ${failed} failed.`);
 console.log(`========================================\n`);

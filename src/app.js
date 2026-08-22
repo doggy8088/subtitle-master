@@ -2,7 +2,7 @@
  * Subtitle Master - Studio Grade Application Controller
  */
 
-import { convertSubtitle, detectFormat, getFormatExtension, getFormatMimeType, ASS_PRESETS } from './converter.js';
+import { convertSubtitle, generateSubtitle, detectFormat, getFormatExtension, getFormatMimeType, ASS_PRESETS } from './converter.js';
 import { decodeBuffer } from './utils/encoding.js';
 import { SAMPLE_SUBTITLES } from './utils/sampleSubtitles.js';
 import { toast } from './ui/toast.js';
@@ -46,7 +46,113 @@ class SubtitleStudioApp {
     this.initPlayer();
     this.bindEvents();
     this.commandPalette = new CommandPalette(this);
-    this.loadSample('srt');
+    this.initContentAndFormats();
+  }
+
+  saveSourceText(text) {
+    try {
+      localStorage.setItem('sm_source_text', text);
+    } catch (e) {
+      console.warn('Failed to save source text to localStorage:', e);
+    }
+  }
+
+  loadSavedSourceText() {
+    try {
+      return localStorage.getItem('sm_source_text');
+    } catch (e) {
+      console.warn('Failed to load source text from localStorage:', e);
+      return null;
+    }
+  }
+
+  updateUrl() {
+    try {
+      const url = new URL(window.location.href);
+      // Clean up legacy/alias param keys
+      url.searchParams.delete('source');
+      url.searchParams.delete('src');
+      url.searchParams.delete('target');
+      url.searchParams.delete('tgt');
+
+      const currentFrom = url.searchParams.get('from');
+      const currentTo = url.searchParams.get('to');
+
+      if (currentFrom !== this.state.sourceFormat || currentTo !== this.state.targetFormat) {
+        url.searchParams.set('from', this.state.sourceFormat);
+        url.searchParams.set('to', this.state.targetFormat);
+        window.history.replaceState(null, '', url.toString());
+      }
+    } catch (e) {
+      console.warn('Failed to update URL:', e);
+    }
+  }
+
+  syncFromUrl() {
+    try {
+      const params = new URLSearchParams(window.location.search);
+      const fromParam = (params.get('from') || params.get('source') || params.get('src') || '').toLowerCase();
+      const toParam = (params.get('to') || params.get('target') || params.get('tgt') || '').toLowerCase();
+
+      const validSource = ['auto', 'srt', 'vtt', 'ass', 'ssa', 'lrc', 'json', 'txt'];
+      const validTarget = ['vtt', 'ass', 'srt', 'ssa', 'lrc', 'txt', 'json', 'csv'];
+
+      let changed = false;
+      if (fromParam && validSource.includes(fromParam)) {
+        if (this.state.sourceFormat !== fromParam) {
+          this.state.sourceFormat = fromParam;
+          changed = true;
+        }
+      }
+
+      if (toParam && validTarget.includes(toParam)) {
+        if (this.state.targetFormat !== toParam) {
+          this.state.targetFormat = toParam;
+          changed = true;
+        }
+      }
+
+      if (this.dom.sourceFormatSelect && this.dom.sourceFormatSelect.value !== this.state.sourceFormat) {
+        this.dom.sourceFormatSelect.value = this.state.sourceFormat;
+      }
+      if (this.dom.targetFormatSelect && this.dom.targetFormatSelect.value !== this.state.targetFormat) {
+        this.dom.targetFormatSelect.value = this.state.targetFormat;
+      }
+
+      return changed;
+    } catch (e) {
+      console.warn('Failed to sync from URL:', e);
+      return false;
+    }
+  }
+
+  handlePopState() {
+    if (this.syncFromUrl()) {
+      this.processConversion();
+    }
+  }
+
+  initContentAndFormats() {
+    // 1. Sync format selection from URL query parameters if present
+    this.syncFromUrl();
+
+    // 2. Check localStorage for previously saved source subtitle text
+    const savedSourceText = this.loadSavedSourceText();
+
+    if (savedSourceText !== null) {
+      this.state.sourceText = savedSourceText;
+      this.dom.sourceInput.value = savedSourceText;
+      this.dom.sourceFormatSelect.value = this.state.sourceFormat;
+      this.dom.targetFormatSelect.value = this.state.targetFormat;
+      this.updateUrl();
+      this.processConversion();
+    } else {
+      // First visit ever: load sample subtitle for the selected or default format
+      const sampleFormat = (this.state.sourceFormat && this.state.sourceFormat !== 'auto' && SAMPLE_SUBTITLES[this.state.sourceFormat])
+        ? this.state.sourceFormat
+        : 'srt';
+      this.loadSample(sampleFormat);
+    }
   }
 
   initTheme() {
@@ -201,17 +307,20 @@ class SubtitleStudioApp {
     // 1. Text input real-time debounce conversion
     this.dom.sourceInput.addEventListener('input', () => {
       this.state.sourceText = this.dom.sourceInput.value;
+      this.saveSourceText(this.state.sourceText);
       this.debounceProcess();
     });
 
     // 2. Format selector change
     this.dom.sourceFormatSelect.addEventListener('change', (e) => {
       this.state.sourceFormat = e.target.value;
+      this.updateUrl();
       this.processConversion();
     });
 
     this.dom.targetFormatSelect.addEventListener('change', (e) => {
       this.state.targetFormat = e.target.value;
+      this.updateUrl();
       this.processConversion();
     });
 
@@ -236,7 +345,9 @@ class SubtitleStudioApp {
       if (this.dom.targetOutput.value.trim()) {
         this.state.sourceText = this.dom.targetOutput.value;
         this.dom.sourceInput.value = this.state.sourceText;
+        this.saveSourceText(this.state.sourceText);
       }
+      this.updateUrl();
       this.processConversion();
       toast.show('已交換來源與目標格式 ⇄', 'info');
     });
@@ -372,6 +483,9 @@ class SubtitleStudioApp {
         this.downloadConvertedFile();
       }
     });
+
+    // 17. Browser History Navigation (Back / Forward)
+    window.addEventListener('popstate', () => this.handlePopState());
   }
 
   setQuickFormat(src, tgt) {
@@ -379,22 +493,26 @@ class SubtitleStudioApp {
     if (tgt) this.state.targetFormat = tgt;
     this.dom.sourceFormatSelect.value = src;
     this.dom.targetFormatSelect.value = tgt;
+    this.updateUrl();
     this.processConversion();
     toast.show(`已切換為 ${src.toUpperCase()} ➔ ${tgt.toUpperCase()} 轉換模式`, 'info');
   }
 
   loadSample(format = 'srt') {
+    const targetFmt = this.state.targetFormat || (format === 'srt' ? 'vtt' : 'ass');
     const sample = SAMPLE_SUBTITLES[format] || SAMPLE_SUBTITLES.srt;
     this.state.sourceText = sample;
     this.state.sourceFormat = format;
-    this.state.targetFormat = format === 'srt' ? 'vtt' : 'ass';
+    this.state.targetFormat = targetFmt;
     this.state.currentFilename = `sample.${format}`;
     this.state.timeOffset = 0;
     
     this.dom.sourceInput.value = sample;
     this.dom.sourceFormatSelect.value = format;
-    this.dom.targetFormatSelect.value = this.state.targetFormat;
+    this.dom.targetFormatSelect.value = targetFmt;
     this.updateTimeOffsetDisplay();
+    this.saveSourceText(sample);
+    this.updateUrl();
     this.processConversion();
   }
 
@@ -612,6 +730,7 @@ class SubtitleStudioApp {
     if (fixedCount > 0) {
       this.state.sourceText = fixedText;
       this.dom.sourceInput.value = fixedText;
+      this.saveSourceText(fixedText);
       this.processConversion();
       this.closeDiagnosticModal();
       toast.show(`已成功自動修復 ${fixedCount} 處語法與時間軸問題！✨`, 'success', 2500);
@@ -659,6 +778,7 @@ class SubtitleStudioApp {
         
         this.state.sourceText = text;
         this.dom.sourceInput.value = text;
+        this.saveSourceText(text);
 
         const detected = detectFormat(text, file.name);
         this.state.sourceFormat = detected;
@@ -672,6 +792,7 @@ class SubtitleStudioApp {
         this.dom.targetFormatSelect.value = this.state.targetFormat;
         this.state.timeOffset = 0;
         this.updateTimeOffsetDisplay();
+        this.updateUrl();
         this.processConversion();
 
         toast.show(`已成功載入 ${file.name}`, 'info', 1800);
@@ -823,6 +944,7 @@ class SubtitleStudioApp {
     this.dom.fileInfoText.textContent = '';
     this.state.timeOffset = 0;
     this.updateTimeOffsetDisplay();
+    this.saveSourceText('');
     this.processConversion();
     toast.show('內容已全部清空', 'info');
   }
@@ -980,14 +1102,15 @@ class SubtitleStudioApp {
   }
 
   rebuildSourceFromCues() {
-    const result = convertSubtitle(this.state.sourceText, {
-      sourceFormat: this.state.sourceFormat,
-      targetFormat: this.state.targetFormat,
-      timeOffset: this.state.timeOffset,
-      assPreset: this.state.assPreset,
-      assCustomStyle: this.state.assCustomStyle
+    const srcFmt = this.state.sourceFormat === 'auto' ? (this.state.stats?.detectedSourceFormat || 'srt') : this.state.sourceFormat;
+    const newSourceText = generateSubtitle(this.state.cues, srcFmt, {
+      preset: this.state.assPreset,
+      style: this.state.assCustomStyle
     });
-    this.dom.targetOutput.value = result.output;
+    this.state.sourceText = newSourceText;
+    this.dom.sourceInput.value = newSourceText;
+    this.saveSourceText(newSourceText);
+    this.processConversion();
   }
 
   hexToAssColor(hex, alpha = '00') {
