@@ -9,7 +9,7 @@ import { toast } from './ui/toast.js';
 import { celebration } from './ui/confetti.js';
 import { formatSecondsToVtt, formatDuration } from './utils/time.js';
 import { SubtitlePlayer } from './ui/player.js';
-import { inspectSubtitle, autoFixSubtitle } from './ui/diagnostics.js';
+import { inspectSubtitle, autoFixSubtitle, locateIssueInText } from './ui/diagnostics.js';
 import { CommandPalette } from './ui/commandPalette.js';
 
 class SubtitleStudioApp {
@@ -501,23 +501,86 @@ class SubtitleStudioApp {
     this.dom.diagnosticModalList.innerHTML = issues.map((iss, i) => {
       const isCritical = iss.type === 'syntax_error' || iss.type === 'syntax_arrow' || iss.type === 'zero_duration';
       const bgClass = isCritical 
-        ? 'bg-rose-50 dark:bg-rose-950/40 border-rose-200 dark:border-rose-800/80 text-rose-700 dark:text-rose-300' 
-        : 'bg-amber-50 dark:bg-amber-950/40 border-amber-200 dark:border-amber-800/80 text-amber-700 dark:text-amber-300';
+        ? 'bg-rose-50/90 dark:bg-rose-950/50 border-rose-200 dark:border-rose-800/80 text-rose-800 dark:text-rose-200' 
+        : 'bg-amber-50/90 dark:bg-amber-950/50 border-amber-200 dark:border-amber-800/80 text-amber-800 dark:text-amber-200';
       const icon = isCritical ? 'fa-solid fa-circle-xmark text-rose-500' : 'fa-solid fa-triangle-exclamation text-amber-500';
 
       return `
-        <div class="p-3 rounded-xl border flex items-start space-x-2.5 ${bgClass}">
-          <i class="${icon} text-sm mt-0.5 flex-shrink-0"></i>
-          <div class="flex-1 min-w-0 leading-relaxed font-medium">
-            ${iss.message}
+        <div data-issue-idx="${i}" class="p-3 rounded-xl border flex items-start space-x-3 cursor-pointer hover:shadow-md transition transform hover:scale-[1.01] active:scale-[0.99] group ${bgClass}" title="點擊立即跳轉並選取問題位置 📍">
+          <i class="${icon} text-base mt-0.5 flex-shrink-0"></i>
+          <div class="flex-1 min-w-0">
+            <div class="font-bold leading-relaxed">${iss.message}</div>
+            <div class="text-[11px] text-slate-500 dark:text-slate-400 mt-1 flex items-center gap-1 group-hover:text-indigo-600 dark:group-hover:text-indigo-400 transition">
+              <i class="fa-solid fa-arrow-pointer text-[10px]"></i>
+              <span>點擊跳轉至問題位置編輯</span>
+            </div>
           </div>
-          ${iss.fixable ? '<span class="text-[10px] px-1.5 py-0.5 rounded bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 font-bold flex-shrink-0 border border-slate-200 dark:border-slate-700 shadow-sm">可自動修復</span>' : ''}
+          <div class="flex-shrink-0 flex items-center gap-1.5 self-center">
+            ${iss.fixable ? `
+              <span class="inline-flex items-center gap-1 text-[11px] font-extrabold px-2 py-1 rounded-lg bg-amber-500/20 text-amber-700 dark:text-amber-300 border border-amber-500/40 shadow-sm">
+                <i class="fa-solid fa-wand-magic-sparkles text-xs animate-pulse text-amber-500"></i>
+                <span>可自動修復</span>
+              </span>
+            ` : `
+              <span class="inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-1 rounded-lg bg-slate-200/80 dark:bg-slate-700/80 text-slate-600 dark:text-slate-300 border border-slate-300 dark:border-slate-600">
+                <i class="fa-solid fa-crosshairs text-[10px]"></i>
+                <span>手動定位</span>
+              </span>
+            `}
+          </div>
         </div>
       `;
     }).join('');
 
+    // Attach click listeners to each issue item for active navigation
+    this.dom.diagnosticModalList.querySelectorAll('[data-issue-idx]').forEach(el => {
+      el.addEventListener('click', () => {
+        const idx = parseInt(el.dataset.issueIdx, 10);
+        this.navigateToIssue(idx);
+      });
+    });
+
     this.dom.diagnosticModal.classList.remove('hidden');
     this.dom.diagnosticModal.classList.add('flex');
+  }
+
+  navigateToIssue(issueIndex) {
+    const iss = this.state.diagnostics.issues[issueIndex];
+    if (!iss) return;
+
+    this.closeDiagnosticModal();
+
+    // If mobile, ensure input tab is active
+    if (window.innerWidth < 768) {
+      this.switchMobileTab('input');
+    }
+
+    const loc = locateIssueInText(this.state.sourceText, iss, this.state.cues);
+
+    if (loc && this.dom.sourceInput) {
+      this.dom.sourceInput.focus();
+      this.dom.sourceInput.setSelectionRange(loc.start, loc.end);
+
+      // Scroll textarea to the problematic line
+      const textBefore = this.state.sourceText.substring(0, loc.start);
+      const lineNumber = textBefore.split('\n').length;
+      const approximateLineHeight = 22;
+      this.dom.sourceInput.scrollTop = Math.max(0, (lineNumber - 3) * approximateLineHeight);
+
+      // If Table View is open and cueIndex is defined, highlight row
+      if (this.state.activeRightView === 'table' && iss.cueIndex !== undefined) {
+        const row = this.dom.tableBody?.querySelector(`tr[data-row-idx="${iss.cueIndex}"]`);
+        if (row) {
+          row.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          row.classList.add('bg-amber-500/30', 'dark:bg-amber-500/40', 'ring-2', 'ring-amber-500');
+          setTimeout(() => {
+            row.classList.remove('bg-amber-500/30', 'dark:bg-amber-500/40', 'ring-2', 'ring-amber-500');
+          }, 2500);
+        }
+      }
+
+      toast.show(iss.cueIndex !== undefined ? `已定位至第 ${iss.cueIndex + 1} 句字幕位置 📍` : '已定位至問題語法位置 📍', 'info', 1600);
+    }
   }
 
   closeDiagnosticModal() {

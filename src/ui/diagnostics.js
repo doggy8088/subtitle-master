@@ -11,7 +11,8 @@ import { formatSecondsToVtt } from '../utils/time.js';
  * @property {'syntax_error'|'syntax_arrow'|'zero_duration'|'overlap'|'empty_text'|'long_duration'|'short_duration'} type
  * @property {number} [cueIndex]
  * @property {string} message
- * @property {boolean} [fixable]
+ * @property {boolean} fixable
+ * @property {string} [searchHint]
  */
 
 /**
@@ -39,14 +40,16 @@ export function inspectSubtitle(rawText, cues = [], format = 'auto') {
     if (/\d\s*->\s*\d/.test(text)) {
       issues.push({
         type: 'syntax_arrow',
-        message: '時間軸語法錯誤：發現箭頭為 "->"（標準時間格式應為 "-->"，例如 00:00:01,000 --> 00:00:04,000）',
-        fixable: true
+        message: '時間軸箭頭語法錯誤：發現誤寫為 "->"（標準時間格式應為 "-->"，例如 00:00:01,000 --> 00:00:04,000）',
+        fixable: true,
+        searchHint: '->'
       });
     } else {
       issues.push({
         type: 'syntax_error',
-        message: '格式無法解析：未找到有效的時間軸標記（例如 00:00:01,000 --> 00:00:04,000 或 [00:01.00]）',
-        fixable: false
+        message: '格式無法解析：未找到有效字幕時間軸（請確認格式，例如 00:00:01,000 --> 00:00:04,000 或 [00:01.00]）',
+        fixable: false,
+        searchHint: text.slice(0, 30)
       });
     }
 
@@ -61,8 +64,9 @@ export function inspectSubtitle(rawText, cues = [], format = 'auto') {
   if (/\d\s*->\s*\d/.test(text) && !/-->/.test(text)) {
     issues.push({
       type: 'syntax_arrow',
-      message: '發現部分時間軸使用 "->" 箭頭（標準應為 "-->"）',
-      fixable: true
+      message: '發現部分時間軸使用 "->" 箭頭（標準應為 "-->"），可能導致部分語句遺漏',
+      fixable: true,
+      searchHint: '->'
     });
   }
 
@@ -77,7 +81,8 @@ export function inspectSubtitle(rawText, cues = [], format = 'auto') {
         type: 'zero_duration',
         cueIndex: i,
         message: `第 ${i + 1} 句時間軸倒置或時長為 0（${formatSecondsToVtt(cue.start)} ~ ${formatSecondsToVtt(cue.end)}，結束時間早於或等於開始時間）`,
-        fixable: true
+        fixable: true,
+        searchHint: cue.text ? cue.text.split('\n')[0] : ''
       });
     }
 
@@ -88,7 +93,8 @@ export function inspectSubtitle(rawText, cues = [], format = 'auto') {
         type: 'overlap',
         cueIndex: i,
         message: `第 ${i} 句與第 ${i + 1} 句時間軸重疊 ${overlap.toFixed(2)} 秒`,
-        fixable: true
+        fixable: true,
+        searchHint: cue.text ? cue.text.split('\n')[0] : ''
       });
     }
 
@@ -98,7 +104,8 @@ export function inspectSubtitle(rawText, cues = [], format = 'auto') {
         type: 'empty_text',
         cueIndex: i,
         message: `第 ${i + 1} 句字幕缺少文字內容`,
-        fixable: true
+        fixable: true,
+        searchHint: ''
       });
     }
 
@@ -108,7 +115,8 @@ export function inspectSubtitle(rawText, cues = [], format = 'auto') {
         type: 'long_duration',
         cueIndex: i,
         message: `第 ${i + 1} 句字幕停留時間過長 (${(cue.end - cue.start).toFixed(1)} 秒)`,
-        fixable: false
+        fixable: false,
+        searchHint: cue.text ? cue.text.split('\n')[0] : ''
       });
     }
 
@@ -118,7 +126,8 @@ export function inspectSubtitle(rawText, cues = [], format = 'auto') {
         type: 'short_duration',
         cueIndex: i,
         message: `第 ${i + 1} 句字幕停留時間極短 (${(cue.end - cue.start).toFixed(2)} 秒，可能一閃而過)`,
-        fixable: false
+        fixable: false,
+        searchHint: cue.text ? cue.text.split('\n')[0] : ''
       });
     }
   }
@@ -194,4 +203,69 @@ export function autoFixSubtitle(rawText, cues = []) {
     fixedCues,
     fixedCount
   };
+}
+
+/**
+ * Calculates start and end character offsets in raw source text for an issue.
+ * @param {string} rawText 
+ * @param {DiagnosticIssue} issue 
+ * @param {Array} cues 
+ * @returns {{ start: number, end: number } | null}
+ */
+export function locateIssueInText(rawText, issue, cues = []) {
+  if (!rawText) return null;
+
+  // 1. Syntax arrow issue
+  if (issue.type === 'syntax_arrow') {
+    const match = rawText.match(/\d{1,2}:\d{2}:\d{2}[,\.]\d{1,3}\s*->\s*\d{1,2}:\d{2}:\d{2}[,\.]\d{1,3}/);
+    if (match) {
+      const idx = rawText.indexOf(match[0]);
+      return { start: idx, end: idx + match[0].length };
+    }
+    const arrowIdx = rawText.indexOf('->');
+    if (arrowIdx !== -1) {
+      return { start: Math.max(0, arrowIdx - 10), end: Math.min(rawText.length, arrowIdx + 12) };
+    }
+  }
+
+  // 2. Syntax error issue
+  if (issue.type === 'syntax_error') {
+    return { start: 0, end: Math.min(rawText.length, 50) };
+  }
+
+  // 3. Issues with cueIndex
+  if (issue.cueIndex !== undefined && cues && cues[issue.cueIndex]) {
+    const cue = cues[issue.cueIndex];
+
+    // Search by cue text
+    if (cue.text && cue.text.trim()) {
+      const firstLine = cue.text.split('\n')[0].trim();
+      const textIdx = rawText.indexOf(firstLine);
+      if (textIdx !== -1) {
+        // Include line before text (timestamp line)
+        const beforeText = rawText.substring(0, textIdx);
+        const lastLineBreak = beforeText.lastIndexOf('\n', beforeText.lastIndexOf('\n') - 1);
+        const startPos = lastLineBreak !== -1 ? lastLineBreak + 1 : 0;
+        return { start: startPos, end: textIdx + firstLine.length };
+      }
+    }
+
+    // Search by searchHint
+    if (issue.searchHint) {
+      const hintIdx = rawText.indexOf(issue.searchHint);
+      if (hintIdx !== -1) {
+        return { start: hintIdx, end: hintIdx + issue.searchHint.length };
+      }
+    }
+
+    // Search by cue ID number on a single line (e.g. \n2\n)
+    const idRegex = new RegExp(`(^|\\n)\\s*${issue.cueIndex + 1}\\s*\\n`);
+    const idMatch = rawText.match(idRegex);
+    if (idMatch) {
+      const startPos = idMatch.index + idMatch[1].length;
+      return { start: startPos, end: Math.min(rawText.length, startPos + 60) };
+    }
+  }
+
+  return null;
 }
