@@ -545,7 +545,7 @@ class SubtitleStudioApp {
   }
 
   navigateToIssue(issueIndex) {
-    const iss = this.state.diagnostics.issues[issueIndex];
+    const iss = this.state.diagnostics?.issues?.[issueIndex];
     if (!iss) return;
 
     this.closeDiagnosticModal();
@@ -559,45 +559,43 @@ class SubtitleStudioApp {
 
     if (loc && this.dom.sourceInput) {
       const textarea = this.dom.sourceInput;
-      textarea.focus();
-      textarea.setSelectionRange(loc.start, loc.end);
 
-      // Compute precise line number and scroll position
-      const textBefore = this.state.sourceText.substring(0, loc.start);
-      const lineNumber = textBefore.split('\n').length;
-      
-      const computed = window.getComputedStyle(textarea);
-      let lineHeight = parseFloat(computed.lineHeight);
-      if (isNaN(lineHeight)) {
-        lineHeight = parseFloat(computed.fontSize) * 1.5 || 22;
-      }
-
-      // Vertically center the selected line in the textarea
-      const targetY = (lineNumber - 1) * lineHeight;
-      const viewHeight = textarea.clientHeight;
-      const centeredScrollTop = Math.max(0, targetY - (viewHeight / 2) + (lineHeight / 2));
-
-      textarea.scrollTop = centeredScrollTop;
-
-      // Pulse visual highlight
-      textarea.classList.add('ring-2', 'ring-indigo-500', 'border-indigo-500');
+      // Defer focus & scrolling to next event loop tick so modal close doesn't steal focus
       setTimeout(() => {
-        textarea.classList.remove('ring-2', 'ring-indigo-500', 'border-indigo-500');
-      }, 1500);
+        textarea.focus();
+        textarea.setSelectionRange(loc.start, loc.end);
 
-      // If Table View is open and cueIndex is defined, highlight row
-      if (this.state.activeRightView === 'table' && iss.cueIndex !== undefined) {
-        const row = this.dom.tableBody?.querySelector(`tr[data-row-idx="${iss.cueIndex}"]`);
-        if (row) {
-          row.scrollIntoView({ behavior: 'smooth', block: 'center' });
-          row.classList.add('bg-amber-500/30', 'dark:bg-amber-500/40', 'ring-2', 'ring-amber-500');
-          setTimeout(() => {
-            row.classList.remove('bg-amber-500/30', 'dark:bg-amber-500/40', 'ring-2', 'ring-amber-500');
-          }, 2500);
+        // Compute precise line number and proportional vertical scroll position
+        const textBefore = this.state.sourceText.substring(0, loc.start);
+        const linesBefore = textBefore.split('\n').length - 1;
+        const totalLines = this.state.sourceText.split('\n').length;
+        
+        // Calculate proportional scroll position
+        const lineRatio = totalLines > 1 ? linesBefore / totalLines : 0;
+        const targetScrollTop = Math.max(0, lineRatio * textarea.scrollHeight - (textarea.clientHeight / 3));
+
+        textarea.scrollTop = targetScrollTop;
+
+        // Pulse visual highlight
+        textarea.classList.add('ring-2', 'ring-indigo-500', 'border-indigo-500');
+        setTimeout(() => {
+          textarea.classList.remove('ring-2', 'ring-indigo-500', 'border-indigo-500');
+        }, 1500);
+
+        // If Table View is open and cueIndex is defined, highlight row
+        if (this.state.activeRightView === 'table' && iss.cueIndex !== undefined) {
+          const row = this.dom.tableBody?.querySelector(`tr[data-row-idx="${iss.cueIndex}"]`);
+          if (row) {
+            row.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            row.classList.add('bg-amber-500/30', 'dark:bg-amber-500/40', 'ring-2', 'ring-amber-500');
+            setTimeout(() => {
+              row.classList.remove('bg-amber-500/30', 'dark:bg-amber-500/40', 'ring-2', 'ring-amber-500');
+            }, 2500);
+          }
         }
-      }
 
-      toast.show(iss.cueIndex !== undefined ? `已精確定位至第 ${iss.cueIndex + 1} 句字幕位置 📍` : '已精確定位至問題語法位置 📍', 'info', 1600);
+        toast.show(iss.cueIndex !== undefined ? `已精確定位至第 ${iss.cueIndex + 1} 句字幕位置 📍` : '已精確定位至問題語法位置 📍', 'info', 1600);
+      }, 50);
     } else {
       toast.show('未能定位該問題，請手動確認格式', 'warning', 2000);
     }
