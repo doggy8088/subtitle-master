@@ -558,14 +558,32 @@ class SubtitleStudioApp {
     const loc = locateIssueInText(this.state.sourceText, iss, this.state.cues);
 
     if (loc && this.dom.sourceInput) {
-      this.dom.sourceInput.focus();
-      this.dom.sourceInput.setSelectionRange(loc.start, loc.end);
+      const textarea = this.dom.sourceInput;
+      textarea.focus();
+      textarea.setSelectionRange(loc.start, loc.end);
 
-      // Scroll textarea to the problematic line
+      // Compute precise line number and scroll position
       const textBefore = this.state.sourceText.substring(0, loc.start);
       const lineNumber = textBefore.split('\n').length;
-      const approximateLineHeight = 22;
-      this.dom.sourceInput.scrollTop = Math.max(0, (lineNumber - 3) * approximateLineHeight);
+      
+      const computed = window.getComputedStyle(textarea);
+      let lineHeight = parseFloat(computed.lineHeight);
+      if (isNaN(lineHeight)) {
+        lineHeight = parseFloat(computed.fontSize) * 1.5 || 22;
+      }
+
+      // Vertically center the selected line in the textarea
+      const targetY = (lineNumber - 1) * lineHeight;
+      const viewHeight = textarea.clientHeight;
+      const centeredScrollTop = Math.max(0, targetY - (viewHeight / 2) + (lineHeight / 2));
+
+      textarea.scrollTop = centeredScrollTop;
+
+      // Pulse visual highlight
+      textarea.classList.add('ring-2', 'ring-indigo-500', 'border-indigo-500');
+      setTimeout(() => {
+        textarea.classList.remove('ring-2', 'ring-indigo-500', 'border-indigo-500');
+      }, 1500);
 
       // If Table View is open and cueIndex is defined, highlight row
       if (this.state.activeRightView === 'table' && iss.cueIndex !== undefined) {
@@ -579,7 +597,9 @@ class SubtitleStudioApp {
         }
       }
 
-      toast.show(iss.cueIndex !== undefined ? `已定位至第 ${iss.cueIndex + 1} 句字幕位置 📍` : '已定位至問題語法位置 📍', 'info', 1600);
+      toast.show(iss.cueIndex !== undefined ? `已精確定位至第 ${iss.cueIndex + 1} 句字幕位置 📍` : '已精確定位至問題語法位置 📍', 'info', 1600);
+    } else {
+      toast.show('未能定位該問題，請手動確認格式', 'warning', 2000);
     }
   }
 

@@ -206,64 +206,163 @@ export function autoFixSubtitle(rawText, cues = []) {
 }
 
 /**
- * Calculates start and end character offsets in raw source text for an issue.
+ * Accurately finds the start and end character offsets of a cue or diagnostic issue in rawText.
+ * Handles SRT, WebVTT, ASS/SSA, LRC, and malformed syntax with high precision.
  * @param {string} rawText 
  * @param {DiagnosticIssue} issue 
  * @param {Array} cues 
  * @returns {{ start: number, end: number } | null}
  */
 export function locateIssueInText(rawText, issue, cues = []) {
-  if (!rawText) return null;
+  if (!rawText || typeof rawText !== 'string') return null;
 
-  // 1. Syntax arrow issue
+  const text = rawText;
+
+  // 1. If issue is malformed arrow (-> instead of -->)
   if (issue.type === 'syntax_arrow') {
-    const match = rawText.match(/\d{1,2}:\d{2}:\d{2}[,\.]\d{1,3}\s*->\s*\d{1,2}:\d{2}:\d{2}[,\.]\d{1,3}/);
-    if (match) {
-      const idx = rawText.indexOf(match[0]);
-      return { start: idx, end: idx + match[0].length };
+    const arrowRegex = /(\d{1,2}:\d{2}(?::\d{2})?[,\.]\d{1,3})\s*->\s*(\d{1,2}:\d{2}(?::\d{2})?[,\.]\d{1,3})/g;
+    let match;
+    let targetMatch = null;
+    let count = 0;
+    const targetIdx = issue.cueIndex !== undefined ? issue.cueIndex : 0;
+
+    while ((match = arrowRegex.exec(text)) !== null) {
+      if (count === targetIdx || targetMatch === null) {
+        targetMatch = match;
+      }
+      if (count === targetIdx) break;
+      count++;
     }
-    const arrowIdx = rawText.indexOf('->');
-    if (arrowIdx !== -1) {
-      return { start: Math.max(0, arrowIdx - 10), end: Math.min(rawText.length, arrowIdx + 12) };
+
+    if (targetMatch) {
+      let lineStart = text.lastIndexOf('\n', targetMatch.index);
+      lineStart = lineStart === -1 ? 0 : lineStart + 1;
+
+      // Check if line before is an integer ID
+      if (lineStart > 1) {
+        const prevLineBreak = text.lastIndexOf('\n', lineStart - 2);
+        const prevLineStart = prevLineBreak === -1 ? 0 : prevLineBreak + 1;
+        const prevLineText = text.substring(prevLineStart, lineStart - 1).trim();
+        if (/^\d+$/.test(prevLineText)) {
+          lineStart = prevLineStart;
+        }
+      }
+
+      let blockEnd = text.indexOf('\n\n', targetMatch.index);
+      if (blockEnd === -1) blockEnd = text.indexOf('\r\n\r\n', targetMatch.index);
+      if (blockEnd === -1) blockEnd = text.length;
+
+      return { start: lineStart, end: blockEnd };
+    }
+
+    const simpleArrow = text.indexOf('->');
+    if (simpleArrow !== -1) {
+      const lStart = text.lastIndexOf('\n', simpleArrow);
+      const lEnd = text.indexOf('\n', simpleArrow);
+      return {
+        start: lStart === -1 ? 0 : lStart + 1,
+        end: lEnd === -1 ? text.length : lEnd
+      };
     }
   }
 
-  // 2. Syntax error issue
+  // 2. If issue is general syntax error (unparseable)
   if (issue.type === 'syntax_error') {
-    return { start: 0, end: Math.min(rawText.length, 50) };
+    const match = text.match(/\S+/);
+    if (match) {
+      const lineStart = text.lastIndexOf('\n', match.index);
+      const lineEnd = text.indexOf('\n', match.index);
+      return {
+        start: lineStart === -1 ? 0 : lineStart + 1,
+        end: lineEnd === -1 ? text.length : lineEnd
+      };
+    }
+    return { start: 0, end: Math.min(text.length, 50) };
   }
 
-  // 3. Issues with cueIndex
-  if (issue.cueIndex !== undefined && cues && cues[issue.cueIndex]) {
-    const cue = cues[issue.cueIndex];
+  // 3. For any issue with a cueIndex (zero_duration, overlap, empty_text, long_duration, short_duration, etc.)
+  if (issue.cueIndex !== undefined && issue.cueIndex >= 0) {
+    const k = issue.cueIndex;
 
-    // Search by cue text
-    if (cue.text && cue.text.trim()) {
-      const firstLine = cue.text.split('\n')[0].trim();
-      const textIdx = rawText.indexOf(firstLine);
-      if (textIdx !== -1) {
-        // Include line before text (timestamp line)
-        const beforeText = rawText.substring(0, textIdx);
-        const lastLineBreak = beforeText.lastIndexOf('\n', beforeText.lastIndexOf('\n') - 1);
-        const startPos = lastLineBreak !== -1 ? lastLineBreak + 1 : 0;
-        return { start: startPos, end: textIdx + firstLine.length };
+    // Check Format A: ASS / SSA format (Dialogue: lines)
+    if (/\[Events\]|Dialogue:/i.test(text)) {
+      const dialogueRegex = /^[ \t]*Dialogue:[^\n]*/gim;
+      let match;
+      let dIndex = 0;
+      while ((match = dialogueRegex.exec(text)) !== null) {
+        if (dIndex === k) {
+          return { start: match.index, end: match.index + match[0].length };
+        }
+        dIndex++;
       }
     }
 
-    // Search by searchHint
-    if (issue.searchHint) {
-      const hintIdx = rawText.indexOf(issue.searchHint);
-      if (hintIdx !== -1) {
-        return { start: hintIdx, end: hintIdx + issue.searchHint.length };
+    // Check Format B: LRC format ([mm:ss.xx] lines)
+    if (/\[\d{1,2}:\d{2}[.\:]\d{2,3}\]/.test(text)) {
+      const lrcRegex = /^[ \t]*\[\d{1,2}:\d{2}[.\:]\d{2,3}\][^\n]*/gm;
+      let match;
+      let lIndex = 0;
+      while ((match = lrcRegex.exec(text)) !== null) {
+        if (lIndex === k) {
+          return { start: match.index, end: match.index + match[0].length };
+        }
+        lIndex++;
       }
     }
 
-    // Search by cue ID number on a single line (e.g. \n2\n)
-    const idRegex = new RegExp(`(^|\\n)\\s*${issue.cueIndex + 1}\\s*\\n`);
-    const idMatch = rawText.match(idRegex);
-    if (idMatch) {
-      const startPos = idMatch.index + idMatch[1].length;
-      return { start: startPos, end: Math.min(rawText.length, startPos + 60) };
+    // Check Format C: SRT / WebVTT standard timestamp lines (-->)
+    const timecodeRegex = /(\d{1,2}:\d{2}(?::\d{2})?[,\.]\d{1,3})\s*(-->|->)\s*(\d{1,2}:\d{2}(?::\d{2})?[,\.]\d{1,3})/g;
+    let match;
+    let tIndex = 0;
+    while ((match = timecodeRegex.exec(text)) !== null) {
+      if (tIndex === k) {
+        // Find start of cue block
+        let blockStart = text.lastIndexOf('\n', match.index);
+        blockStart = blockStart === -1 ? 0 : blockStart + 1;
+
+        // Check if preceding line is a numeric ID (e.g. "1", "2") or cue ID tag
+        if (blockStart > 1) {
+          const prevLineBreak = text.lastIndexOf('\n', blockStart - 2);
+          const prevLineStart = prevLineBreak === -1 ? 0 : prevLineBreak + 1;
+          const prevLineContent = text.substring(prevLineStart, blockStart - 1).trim();
+          if (/^\d+$/.test(prevLineContent) || (prevLineContent.length > 0 && !prevLineContent.includes('-->') && !prevLineContent.startsWith('WEBVTT'))) {
+            blockStart = prevLineStart;
+          }
+        }
+
+        // Find end of cue block (next double newline or next timestamp line or EOF)
+        let blockEnd = text.indexOf('\n\n', match.index);
+        if (blockEnd === -1) blockEnd = text.indexOf('\r\n\r\n', match.index);
+        if (blockEnd === -1) blockEnd = text.length;
+
+        return { start: blockStart, end: blockEnd };
+      }
+      tIndex++;
+    }
+
+    // Fallback: Search sequentially by cue text
+    if (cues && cues[k] && cues[k].text) {
+      const cueText = cues[k].text.trim().split('\n')[0].trim();
+      if (cueText) {
+        let searchFrom = 0;
+        for (let prevIdx = 0; prevIdx < k; prevIdx++) {
+          if (cues[prevIdx] && cues[prevIdx].text) {
+            const prevText = cues[prevIdx].text.trim().split('\n')[0].trim();
+            if (prevText) {
+              const found = text.indexOf(prevText, searchFrom);
+              if (found !== -1) searchFrom = found + prevText.length;
+            }
+          }
+        }
+        const textPos = text.indexOf(cueText, searchFrom);
+        if (textPos !== -1) {
+          let lineStart = text.lastIndexOf('\n', textPos);
+          lineStart = lineStart === -1 ? 0 : lineStart + 1;
+          let lineEnd = text.indexOf('\n', textPos);
+          lineEnd = lineEnd === -1 ? text.length : lineEnd;
+          return { start: lineStart, end: lineEnd };
+        }
+      }
     }
   }
 
