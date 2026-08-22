@@ -1,0 +1,98 @@
+/**
+ * Subtitle Master - Modern Custom Styles & Animations
+ */
+
+@layer base {
+  html, body {
+    height: 100%;
+    margin: 0;
+    padding: 0;
+    font-family: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Noto Sans TC', 'Microsoft JhengHei', sans-serif;
+    -webkit-tap-highlight-color: transparent;
+  }
+}
+
+/* Slim Custom Scrollbars */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(148, 163, 184, 0.4);
+  border-radius: 9999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(100, 116, 139, 0.7);
+}
+.dark ::-webkit-scrollbar-thumb {
+  background: rgba(71, 85, 105, 0.6);
+}
+.dark ::-webkit-scrollbar-thumb:hover {
+  background: rgba(148, 163, 184, 0.8);
+}
+
+/* Drag and Drop Active Effect */
+.drop-active {
+  border-color: #6366f1 !important; /* indigo-500 */
+  background-color: rgba(238, 242, 255, 0.85) !important;
+  transform: scale(1.005);
+}
+.dark .drop-active {
+  background-color: rgba(49, 46, 129, 0.4) !important;
+  border-color: #818cf8 !important;
+}
+
+/* Pop-in animation for Celebration Modal */
+@keyframes popIn {
+  0% { transform: scale(0.6) translateY(20px); opacity: 0; }
+  70% { transform: scale(1.04) translateY(0); opacity: 1; }
+  100% { transform: scale(1); opacity: 1; }
+}
+.animate-pop-in {
+  animation: popIn 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+/* Glassmorphism Panels */
+.glass-panel {
+  background: rgba(255, 255, 255, 0.85);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+.dark .glass-panel {
+  background: rgba(30, 41, 59, 0.85);
+}
+
+/* Simulated Video Screen for Subtitle Live Preview */
+.subtitle-preview-screen {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  background: radial-gradient(circle at center, #1e293b 0%, #0f172a 100%);
+  border-radius: 0.75rem;
+  overflow: hidden;
+  box-shadow: inset 0 2px 10px rgba(0, 0, 0, 0.6);
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  align-items: center;
+  padding: 1.5rem;
+  user-select: none;
+}
+
+.subtitle-preview-text {
+  text-align: center;
+  font-weight: 600;
+  line-height: 1.4;
+  transition: all 0.2s ease;
+  white-space: pre-wrap;
+}
+
+/* Touch active state for mobile */
+@media (hover: none) {
+  button:active, a:active {
+    transform: scale(0.97);
+  }
+}

@@ -1,0 +1,25 @@
+{
+  "name": "subtitle-master",
+  "version": "1.0.0",
+  "description": "萬用字幕格式轉換大師 - 支援 SRT, WebVTT, ASS, SSA, LRC, JSON, CSV, TXT 任意互轉",
+  "type": "module",
+  "scripts": {
+    "test": "node test/converter.test.js",
+    "dev": "npx serve .",
+    "start": "npx serve ."
+  },
+  "keywords": [
+    "subtitle",
+    "converter",
+    "srt",
+    "vtt",
+    "webvtt",
+    "ass",
+    "ssa",
+    "lrc",
+    "subtitles",
+    "browser-only"
+  ],
+  "author": "Will 保哥",
+  "license": "MIT"
+}

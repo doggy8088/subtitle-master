@@ -1,0 +1,451 @@
+<!DOCTYPE html>
+<html lang="zh-Hant" class="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>Subtitle Master 字幕萬用轉換大師 | 萬用字幕格式轉換器</title>
+  <meta name="description" content="免費、高隱私、支援 SRT、VTT、ASS、SSA、LRC、JSON、CSV、TXT 任意互轉的萬用字幕格式轉換工具。完全於瀏覽器本機執行，支援拖曳上傳與時間軸微調。">
+  <link rel="icon" href="favicon.ico" type="image/x-icon">
+  
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            brand: {
+              50: '#eef2ff',
+              100: '#e0e7ff',
+              500: '#6366f1',
+              600: '#4f46e5',
+              700: '#4338ca',
+            }
+          }
+        }
+      }
+    }
+  </script>
+
+  <!-- Google Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Noto+Sans+TC:wght@400;500;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  
+  <!-- Font Awesome Icons -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  
+  <!-- JSZip for Multi-file ZIP Export -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+
+  <!-- Custom App Styles -->
+  <link rel="stylesheet" href="src/css/app.css">
+</head>
+<body class="bg-slate-100 dark:bg-slate-950 text-slate-800 dark:text-slate-100 flex flex-col h-[100dvh] overflow-hidden antialiased select-none md:select-auto">
+
+  <!-- ==================== HEADER ==================== -->
+  <header class="flex-shrink-0 bg-white/95 dark:bg-slate-900/95 border-b border-slate-200 dark:border-slate-800 backdrop-blur-md z-30 px-3 sm:px-6 py-2">
+    <div class="max-w-7xl mx-auto flex items-center justify-between gap-2 sm:gap-4">
+      
+      <!-- Brand Logo & Title -->
+      <div class="flex items-center space-x-2.5 min-w-0">
+        <div class="w-8 h-8 sm:w-9 sm:h-9 rounded-xl bg-gradient-to-tr from-indigo-600 via-indigo-500 to-purple-500 flex items-center justify-center text-white shadow-md shadow-indigo-500/20 flex-shrink-0">
+          <i class="fa-solid fa-closed-captioning text-base sm:text-lg"></i>
+        </div>
+        <div class="min-w-0">
+          <div class="flex items-center gap-1.5 sm:gap-2">
+            <h1 class="text-base sm:text-lg font-bold bg-gradient-to-r from-indigo-600 via-purple-600 to-pink-600 dark:from-indigo-400 dark:via-purple-400 dark:to-pink-400 bg-clip-text text-transparent leading-tight truncate">
+              Subtitle Master
+            </h1>
+            <span class="hidden sm:inline-block px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider rounded-md bg-indigo-100 dark:bg-indigo-950 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800 flex-shrink-0">
+              萬用字幕轉換器
+            </span>
+          </div>
+          <p class="hidden md:block text-[11px] text-slate-500 dark:text-slate-400 leading-tight">
+            SRT · VTT · ASS · SSA · LRC · JSON · TXT 任意互轉 · 100% 本機瀏覽器極速處理
+          </p>
+        </div>
+      </div>
+
+      <!-- Quick Preset Format Pills (Desktop) -->
+      <div class="hidden lg:flex items-center space-x-1.5 bg-slate-100 dark:bg-slate-800/80 p-1 rounded-xl border border-slate-200 dark:border-slate-700 text-xs flex-shrink-0">
+        <span class="text-[11px] font-medium text-slate-400 px-1.5">常用捷徑:</span>
+        <button data-quick-format="srt->vtt" class="px-2.5 py-1 rounded-lg font-medium hover:bg-white dark:hover:bg-slate-700 transition text-slate-700 dark:text-slate-200">
+          SRT ➔ VTT
+        </button>
+        <button data-quick-format="vtt->ass" class="px-2.5 py-1 rounded-lg font-medium hover:bg-white dark:hover:bg-slate-700 transition text-slate-700 dark:text-slate-200">
+          VTT ➔ ASS
+        </button>
+        <button data-quick-format="srt->ass" class="px-2.5 py-1 rounded-lg font-medium hover:bg-white dark:hover:bg-slate-700 transition text-slate-700 dark:text-slate-200">
+          SRT ➔ ASS
+        </button>
+        <button data-quick-format="ass->srt" class="px-2.5 py-1 rounded-lg font-medium hover:bg-white dark:hover:bg-slate-700 transition text-slate-700 dark:text-slate-200">
+          ASS ➔ SRT
+        </button>
+        <button data-quick-format="auto->txt" class="px-2.5 py-1 rounded-lg font-medium hover:bg-white dark:hover:bg-slate-700 transition text-slate-700 dark:text-slate-200">
+          轉純文字 (TXT)
+        </button>
+      </div>
+
+      <!-- Right Header Actions -->
+      <div class="flex items-center space-x-1.5 sm:space-x-2 flex-shrink-0">
+        <button id="btnSample" title="載入示範字幕" class="px-2.5 sm:px-3 py-1.5 rounded-lg text-xs font-semibold bg-indigo-50 dark:bg-indigo-950/80 text-indigo-600 dark:text-indigo-300 hover:bg-indigo-100 dark:hover:bg-indigo-900 border border-indigo-200 dark:border-indigo-800 transition flex items-center gap-1.5 active:scale-95">
+          <i class="fa-solid fa-wand-magic-sparkles text-xs"></i>
+          <span>示範字幕</span>
+        </button>
+
+        <button id="themeToggleBtn" title="切換深淺模式" class="w-8 h-8 rounded-lg flex items-center justify-center text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition border border-slate-200 dark:border-slate-700 active:scale-95">
+          <span id="themeIcon">
+            <i class="fa-solid fa-moon"></i>
+          </span>
+        </button>
+
+        <a href="https://github.com/doggy8088" target="_blank" rel="noopener noreferrer" title="GitHub" class="w-8 h-8 rounded-lg flex items-center justify-center text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition border border-slate-200 dark:border-slate-700 active:scale-95">
+          <i class="fa-brands fa-github text-sm"></i>
+        </a>
+      </div>
+    </div>
+  </header>
+
+  <!-- ==================== MOBILE NAVIGATION TABS ==================== -->
+  <div class="flex-shrink-0 md:hidden bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 px-3 py-1.5 flex gap-2">
+    <button id="tabInputBtn" class="flex-1 py-2 text-xs font-bold rounded-lg bg-indigo-600 text-white transition flex items-center justify-center gap-1.5 shadow-sm active:scale-98">
+      <i class="fa-solid fa-file-import"></i>
+      <span>1. 來源字幕</span>
+    </button>
+    <button id="tabOutputBtn" class="flex-1 py-2 text-xs font-bold rounded-lg text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition flex items-center justify-center gap-1.5 active:scale-98">
+      <i class="fa-solid fa-file-export"></i>
+      <span>2. 轉換結果</span>
+    </button>
+  </div>
+
+  <!-- ==================== MAIN WORKSPACE ==================== -->
+  <main class="flex-1 min-h-0 p-2 sm:p-3 md:p-4 max-w-7xl w-full mx-auto grid grid-cols-1 md:grid-cols-2 gap-3 sm:gap-4 overflow-hidden">
+
+    <!-- ==================== LEFT COLUMN: SOURCE INPUT PANE ==================== -->
+    <section id="mobileInputPane" class="flex flex-col h-full min-h-0 bg-white dark:bg-slate-900 rounded-2xl border border-slate-200/80 dark:border-slate-800 shadow-sm overflow-hidden">
+      
+      <!-- Card Header -->
+      <div class="flex-shrink-0 px-3 py-2 sm:py-2.5 border-b border-slate-100 dark:border-slate-800/80 flex items-center justify-between gap-2 bg-slate-50/50 dark:bg-slate-900/50">
+        <div class="flex items-center space-x-1.5 min-w-0">
+          <span class="text-xs sm:text-sm font-bold text-slate-800 dark:text-slate-100 flex items-center gap-1 flex-shrink-0">
+            <i class="fa-solid fa-arrow-down-to-bracket text-indigo-500"></i>
+            <span class="hidden sm:inline">來源格式</span>
+            <span class="sm:hidden">來源</span>
+          </span>
+          <select id="sourceFormatSelect" class="text-xs font-semibold bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg px-2 py-1 text-slate-700 dark:text-slate-200 focus:ring-2 focus:ring-indigo-500 focus:outline-none cursor-pointer max-w-[140px] sm:max-w-none truncate">
+            <option value="auto">⚡ 自動辨識 (Auto)</option>
+            <option value="srt">SRT (.srt)</option>
+            <option value="vtt">WebVTT (.vtt)</option>
+            <option value="ass">ASS (.ass)</option>
+            <option value="ssa">SSA (.ssa)</option>
+            <option value="lrc">LRC (歌詞)</option>
+            <option value="json">JSON (.json)</option>
+            <option value="txt">純文字 (.txt)</option>
+          </select>
+        </div>
+
+        <div class="flex items-center space-x-1.5 flex-shrink-0">
+          <span id="detectedBadge" class="px-2 py-0.5 text-[10px] sm:text-[11px] font-bold rounded-full bg-slate-200 dark:bg-slate-800 text-slate-600 dark:text-slate-400 truncate max-w-[100px] sm:max-w-none">
+            自動檢測中
+          </span>
+          <button id="btnClear" title="清除內容" class="p-1.5 text-xs text-slate-400 hover:text-rose-500 dark:hover:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/30 rounded-lg transition" aria-label="Clear input">
+            <i class="fa-solid fa-trash-can"></i>
+          </button>
+        </div>
+      </div>
+
+      <!-- Textarea & Drop Zone -->
+      <div id="dropZone" class="flex-1 min-h-0 relative flex flex-col p-2 sm:p-3 transition-colors duration-200">
+        <textarea id="sourceInput" spellcheck="false" 
+          class="flex-1 w-full h-full p-2.5 sm:p-3 font-mono text-xs sm:text-sm bg-slate-50 dark:bg-slate-950/60 text-slate-800 dark:text-slate-200 border border-slate-200 dark:border-slate-800/80 rounded-xl focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 focus:outline-none resize-none leading-relaxed transition"
+          placeholder="拖曳 .srt, .vtt, .ass, .lrc, .json 檔案至此處，或直接貼上字幕內容...&#10;&#10;範例：&#10;1&#10;00:00:01,000 --> 00:00:04,000&#10;歡迎使用萬用字幕格式轉換大師！&#10;&#10;2&#10;00:00:04,500 --> 00:00:08,000&#10;支援任意格式互相轉換與時間軸微調。"></textarea>
+        
+        <input type="file" id="fileInput" multiple accept=".srt,.vtt,.webvtt,.ass,.ssa,.lrc,.json,.txt,.csv" class="hidden">
+      </div>
+
+      <!-- Left Card Footer Toolbar -->
+      <div class="flex-shrink-0 px-2.5 sm:px-3 py-2 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between gap-1.5 bg-slate-50/50 dark:bg-slate-900/50 text-xs">
+        
+        <!-- Upload Trigger & File Info -->
+        <div class="flex items-center space-x-1.5 overflow-hidden min-w-0">
+          <button onclick="document.getElementById('fileInput').click()" class="px-2.5 sm:px-3 py-1.5 bg-indigo-50 dark:bg-indigo-950 text-indigo-600 dark:text-indigo-300 hover:bg-indigo-100 dark:hover:bg-indigo-900 rounded-lg font-semibold flex items-center gap-1.5 transition active:scale-95 flex-shrink-0 text-xs">
+            <i class="fa-solid fa-cloud-arrow-up"></i>
+            <span>選取檔案</span>
+          </button>
+          <span id="fileInfoText" class="text-[11px] text-slate-500 dark:text-slate-400 truncate max-w-[90px] sm:max-w-[160px]"></span>
+        </div>
+
+        <!-- Time Shift Controls -->
+        <div class="flex items-center space-x-0.5 sm:space-x-1 flex-shrink-0">
+          <span class="text-[10px] text-slate-400 font-medium hidden lg:inline">微調:</span>
+          <button id="btnTimeMinus1" title="提早 1 秒 (-1s)" class="px-1.5 py-1 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 rounded font-mono text-[11px] font-medium transition active:scale-95">-1s</button>
+          <button id="btnTimeMinus05" title="提早 0.5 秒 (-0.5s)" class="px-1.5 py-1 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 rounded font-mono text-[11px] font-medium transition active:scale-95">-0.5s</button>
+          <span id="timeOffsetDisplay" class="font-mono text-[11px] px-1.5 py-0.5 rounded font-medium text-slate-500 dark:text-slate-400">0.0s</span>
+          <button id="btnTimePlus05" title="延後 0.5 秒 (+0.5s)" class="px-1.5 py-1 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 rounded font-mono text-[11px] font-medium transition active:scale-95">+0.5s</button>
+          <button id="btnTimePlus1" title="延後 1 秒 (+1s)" class="px-1.5 py-1 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 rounded font-mono text-[11px] font-medium transition active:scale-95">+1s</button>
+          <button id="btnTimeReset" title="重置時間軸 (0s)" class="p-1 text-slate-400 hover:text-indigo-500 rounded transition active:scale-95"><i class="fa-solid fa-rotate-left text-[10px]"></i></button>
+        </div>
+
+      </div>
+    </section>
+
+    <!-- ==================== RIGHT COLUMN: TARGET OUTPUT PANE ==================== -->
+    <section id="mobileOutputPane" class="hidden md:flex flex-col h-full min-h-0 bg-white dark:bg-slate-900 rounded-2xl border border-slate-200/80 dark:border-slate-800 shadow-sm overflow-hidden">
+      
+      <!-- Card Header -->
+      <div class="flex-shrink-0 px-3 py-2 sm:py-2.5 border-b border-slate-100 dark:border-slate-800/80 flex items-center justify-between gap-1.5 bg-slate-50/50 dark:bg-slate-900/50">
+        
+        <!-- Target Format Selector & Swap Button -->
+        <div class="flex items-center space-x-1.5 min-w-0">
+          <button id="btnSwapFormat" title="交換來源與目標格式" class="w-6 h-6 sm:w-7 sm:h-7 flex items-center justify-center rounded-lg bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-indigo-50 dark:hover:bg-indigo-950 hover:text-indigo-600 dark:hover:text-indigo-400 transition active:scale-95 flex-shrink-0">
+            <i class="fa-solid fa-right-left text-[10px] sm:text-xs"></i>
+          </button>
+          
+          <span class="text-xs sm:text-sm font-bold text-slate-800 dark:text-slate-100 flex items-center gap-1 flex-shrink-0">
+            <i class="fa-solid fa-arrow-up-from-bracket text-emerald-500"></i>
+            <span class="hidden sm:inline">目標格式</span>
+            <span class="sm:hidden">目標</span>
+          </span>
+
+          <select id="targetFormatSelect" class="text-xs font-semibold bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg px-2 py-1 text-slate-700 dark:text-slate-200 focus:ring-2 focus:ring-indigo-500 focus:outline-none cursor-pointer max-w-[130px] sm:max-w-none truncate">
+            <option value="vtt">WebVTT (.vtt)</option>
+            <option value="ass">ASS (.ass)</option>
+            <option value="srt">SRT (.srt)</option>
+            <option value="ssa">SSA (.ssa)</option>
+            <option value="lrc">LRC (歌詞)</option>
+            <option value="txt">純字幕文字 (.txt)</option>
+            <option value="json">結構化 JSON (.json)</option>
+            <option value="csv">表格 CSV (.csv)</option>
+          </select>
+
+          <!-- ASS Style Customizer Trigger Button -->
+          <button id="btnAssModal" class="hidden px-2 py-1 text-[10px] sm:text-[11px] font-bold rounded-md bg-amber-50 dark:bg-amber-950/80 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-800 hover:bg-amber-100 transition flex items-center gap-1 flex-shrink-0">
+            <i class="fa-solid fa-palette text-[10px]"></i>
+            <span class="hidden sm:inline">樣式自訂</span>
+          </button>
+        </div>
+
+        <!-- View Mode Switcher (Raw / Table / Screen) -->
+        <div class="flex items-center bg-slate-100 dark:bg-slate-800 p-0.5 rounded-lg border border-slate-200 dark:border-slate-700 flex-shrink-0">
+          <button id="viewRawBtn" class="px-2 sm:px-2.5 py-1 text-[11px] sm:text-xs font-semibold rounded-md bg-indigo-600 text-white shadow-sm transition">
+            原始碼
+          </button>
+          <button id="viewTableBtn" class="px-2 sm:px-2.5 py-1 text-[11px] sm:text-xs font-semibold rounded-md text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700 transition">
+            表格
+          </button>
+          <button id="viewScreenBtn" class="px-2 sm:px-2.5 py-1 text-[11px] sm:text-xs font-semibold rounded-md text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700 transition">
+            預覽
+          </button>
+        </div>
+
+      </div>
+
+      <!-- Right Card Body (View Container) -->
+      <div class="flex-1 min-h-0 relative flex flex-col p-2 sm:p-3 overflow-hidden">
+        
+        <!-- 1. Raw Text Output View -->
+        <div id="viewRawContainer" class="w-full h-full flex flex-col min-h-0">
+          <textarea id="targetOutput" readonly spellcheck="false"
+            class="flex-1 w-full h-full p-2.5 sm:p-3 font-mono text-xs sm:text-sm bg-slate-50 dark:bg-slate-950/60 text-slate-800 dark:text-slate-200 border border-slate-200 dark:border-slate-800/80 rounded-xl focus:border-indigo-500 focus:outline-none resize-none leading-relaxed transition"
+            placeholder="轉換後的字幕將即時顯示在此處..."></textarea>
+        </div>
+
+        <!-- 2. Table Data View -->
+        <div id="viewTableContainer" class="hidden w-full h-full overflow-y-auto bg-slate-50 dark:bg-slate-950/60 border border-slate-200 dark:border-slate-800/80 rounded-xl min-h-0">
+          <table class="w-full text-left border-collapse">
+            <thead class="sticky top-0 bg-slate-200/90 dark:bg-slate-800/90 backdrop-blur-sm text-[11px] font-bold text-slate-600 dark:text-slate-300 uppercase">
+              <tr>
+                <th class="p-2 text-center w-10">#</th>
+                <th class="p-2 w-24">開始時間</th>
+                <th class="p-2 w-24">結束時間</th>
+                <th class="p-2">字幕文字 (可直接點擊編輯)</th>
+              </tr>
+            </thead>
+            <tbody id="tableBody" class="divide-y divide-slate-100 dark:divide-slate-800/60"></tbody>
+          </table>
+        </div>
+
+        <!-- 3. Subtitle Screen Live Preview View -->
+        <div id="viewScreenContainer" class="hidden w-full h-full flex flex-col justify-between p-1 sm:p-2 min-h-0">
+          
+          <div class="subtitle-preview-screen flex-1 min-h-[140px]">
+            <div id="previewScreenText" class="subtitle-preview-text text-amber-300 text-base sm:text-lg">
+              預覽字幕文字
+            </div>
+          </div>
+
+          <!-- Video Stepper Toolbar -->
+          <div class="flex-shrink-0 mt-2 sm:mt-3 p-2.5 sm:p-3 bg-slate-50 dark:bg-slate-800/60 rounded-xl border border-slate-200 dark:border-slate-700 flex flex-col gap-1.5 sm:gap-2">
+            <div class="flex items-center justify-between text-[11px] font-mono text-slate-500 dark:text-slate-400">
+              <span id="previewTimeText">00:00:00.000 ➔ 00:00:00.000</span>
+              <span id="previewCueCounter" class="font-bold text-indigo-500">1 / 1</span>
+            </div>
+            
+            <div class="flex items-center gap-2 sm:gap-3">
+              <button id="btnPrevCue" class="px-2.5 py-1 bg-slate-200 dark:bg-slate-700 hover:bg-slate-300 dark:hover:bg-slate-600 rounded-lg text-xs font-bold transition active:scale-95">
+                <i class="fa-solid fa-backward-step mr-1"></i> 上一句
+              </button>
+              <input type="range" id="previewTimelineSlider" min="0" max="0" value="0" class="flex-1 accent-indigo-600 cursor-pointer">
+              <button id="btnNextCue" class="px-2.5 py-1 bg-slate-200 dark:bg-slate-700 hover:bg-slate-300 dark:hover:bg-slate-600 rounded-lg text-xs font-bold transition active:scale-95">
+                下一句 <i class="fa-solid fa-forward-step ml-1"></i>
+              </button>
+            </div>
+          </div>
+
+        </div>
+
+        <!-- 4. Batch Mode Container (When multiple files are dropped) -->
+        <div id="batchContainer" class="hidden w-full h-full flex flex-col overflow-hidden bg-slate-50 dark:bg-slate-950/60 border border-slate-200 dark:border-slate-800 rounded-xl p-3 min-h-0">
+          <div class="flex items-center justify-between mb-3">
+            <div class="font-bold text-sm text-slate-800 dark:text-slate-200 flex items-center gap-2">
+              <i class="fa-solid fa-layer-group text-indigo-500"></i>
+              <span>批次轉換清單</span>
+            </div>
+            <div class="flex gap-2">
+              <button id="btnBatchDownloadAll" class="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-lg shadow transition flex items-center gap-1.5 active:scale-95">
+                <i class="fa-solid fa-file-zipper"></i>
+                <span>全部打包下載 (ZIP)</span>
+              </button>
+              <button id="btnExitBatch" class="px-2.5 py-1.5 bg-slate-200 dark:bg-slate-700 hover:bg-slate-300 text-slate-700 dark:text-slate-300 text-xs font-semibold rounded-lg transition active:scale-95">
+                關閉批次
+              </button>
+            </div>
+          </div>
+          <div id="batchFileList" class="flex-1 overflow-y-auto space-y-2 pr-1"></div>
+        </div>
+
+      </div>
+
+      <!-- Right Card Footer Toolbar -->
+      <div class="flex-shrink-0 px-2.5 sm:px-3 py-2 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between gap-1.5 bg-slate-50/50 dark:bg-slate-900/50 text-xs">
+        
+        <!-- Subtitle Metrics Badge -->
+        <div class="flex items-center space-x-1.5 min-w-0">
+          <span id="statsBadge" class="text-[11px] font-medium text-slate-500 dark:text-slate-400 truncate">
+            0 條字幕 · 0 字
+          </span>
+        </div>
+
+        <!-- Action Buttons -->
+        <div class="flex items-center space-x-1.5 sm:space-x-2 flex-shrink-0">
+          <button id="btnCopy" class="px-3 sm:px-3.5 py-1.5 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 font-semibold rounded-lg shadow-sm border border-slate-200 dark:border-slate-700 transition flex items-center gap-1.5 active:scale-95">
+            <i class="fa-solid fa-copy text-xs"></i>
+            <span>複製內容</span>
+          </button>
+          
+          <button id="btnDownload" class="px-3.5 sm:px-4 py-1.5 bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-700 hover:to-purple-700 text-white font-bold rounded-lg shadow-md shadow-indigo-500/20 transition flex items-center gap-1.5 active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed">
+            <i class="fa-solid fa-download text-xs"></i>
+            <span>下載檔案</span>
+          </button>
+        </div>
+
+      </div>
+
+    </section>
+
+  </main>
+
+  <!-- ==================== FOOTER ==================== -->
+  <footer class="flex-shrink-0 bg-white/90 dark:bg-slate-900/90 border-t border-slate-200 dark:border-slate-800 text-[11px] text-slate-500 dark:text-slate-400 py-1.5 px-3 sm:px-4 z-20">
+    <div class="max-w-7xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-1 sm:gap-4">
+      
+      <!-- Author branding -->
+      <div class="flex items-center space-x-2">
+        <img src="https://avatars.githubusercontent.com/u/88981?v=4" alt="Will 保哥" class="w-4 h-4 rounded-full" onerror="this.src='https://placehold.co/16x16/cccccc/333333?text=W';">
+        <span>© <span id="currentYear">2026</span> <strong>Will 保哥</strong>. All rights reserved.</span>
+      </div>
+
+      <!-- Privacy Pledge & Social Links -->
+      <div class="flex items-center space-x-3 sm:space-x-4">
+        <span class="flex items-center gap-1 text-emerald-600 dark:text-emerald-400 font-medium">
+          <i class="fa-solid fa-shield-halved text-[10px]"></i>
+          <span>100% 本機瀏覽器執行 · 隱私無憂</span>
+        </span>
+        
+        <div class="flex items-center space-x-3 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200">
+          <a href="https://twitter.com/Will_Huang" target="_blank" rel="noopener noreferrer" title="Twitter" class="hover:text-indigo-500 transition"><i class="fa-brands fa-twitter"></i></a>
+          <a href="https://github.com/doggy8088" target="_blank" rel="noopener noreferrer" title="GitHub" class="hover:text-indigo-500 transition"><i class="fa-brands fa-github"></i></a>
+          <a href="https://www.facebook.com/will.fans" target="_blank" rel="noopener noreferrer" title="Facebook" class="hover:text-indigo-500 transition"><i class="fa-brands fa-facebook"></i></a>
+        </div>
+      </div>
+
+    </div>
+  </footer>
+
+  <!-- ==================== ASS STYLE CUSTOMIZER MODAL ==================== -->
+  <div id="assModal" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm hidden items-center justify-center z-50 p-4">
+    <div class="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl shadow-2xl max-w-lg w-full p-6 animate-pop-in">
+      
+      <div class="flex items-center justify-between mb-4 border-b border-slate-100 dark:border-slate-700 pb-3">
+        <div class="flex items-center gap-2">
+          <i class="fa-solid fa-palette text-indigo-500 text-lg"></i>
+          <h3 class="text-base font-bold text-slate-800 dark:text-slate-100">ASS 字幕樣式自訂</h3>
+        </div>
+        <button id="btnCloseAssModal" class="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 p-1 rounded-lg">
+          <i class="fa-solid fa-xmark text-base"></i>
+        </button>
+      </div>
+
+      <div class="space-y-4 text-xs sm:text-sm">
+        <div>
+          <label class="block font-semibold text-slate-700 dark:text-slate-300 mb-1">樣式預設集 (Presets):</label>
+          <select id="assPresetSelect" class="w-full bg-slate-50 dark:bg-slate-700 border border-slate-300 dark:border-slate-600 rounded-lg p-2 font-medium">
+            <option value="classicYellow">🟡 經典黃字黑邊 (Classic Yellow)</option>
+            <option value="modernWhite">⚪ 簡約白字黑邊 (Modern White)</option>
+            <option value="netflixStyle">🎬 Netflix 簡潔風格 (Netflix)</option>
+            <option value="animePink">🌸 櫻花粉動漫風 (Anime Pink)</option>
+            <option value="cyanGlow">💠 科技青藍風 (Cyan Glow)</option>
+          </select>
+        </div>
+
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label class="block font-semibold text-slate-700 dark:text-slate-300 mb-1">字型名稱 (Font):</label>
+            <input type="text" id="assFontName" value="微軟正黑體" class="w-full bg-slate-50 dark:bg-slate-700 border border-slate-300 dark:border-slate-600 rounded-lg p-2 font-medium">
+          </div>
+          <div>
+            <label class="block font-semibold text-slate-700 dark:text-slate-300 mb-1">字體大小 (Font Size):</label>
+            <input type="number" id="assFontSize" value="52" min="20" max="100" class="w-full bg-slate-50 dark:bg-slate-700 border border-slate-300 dark:border-slate-600 rounded-lg p-2 font-medium">
+          </div>
+        </div>
+
+        <div class="p-3 bg-indigo-50 dark:bg-indigo-950/60 rounded-xl border border-indigo-100 dark:border-indigo-900 text-xs text-indigo-700 dark:text-indigo-300">
+          💡 提示：轉換為 ASS 格式時，這些樣式會自動寫入 <code>[V4+ Styles]</code> 區塊，播放器載入時即可呈現專屬樣式！
+        </div>
+      </div>
+
+      <div class="mt-6 flex justify-end gap-2">
+        <button id="btnSaveAssModal" class="px-5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl shadow-md transition">
+          套用樣式設定
+        </button>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- ==================== CELEBRATION CONFETTI & OVERLAY ==================== -->
+  <div id="successOverlay" class="fixed inset-0 bg-black/60 backdrop-blur-sm hidden items-center justify-center z-[100] p-4">
+    <canvas id="confettiCanvas" class="absolute inset-0 pointer-events-none w-full h-full"></canvas>
+    <div class="relative bg-gradient-to-br from-emerald-500 via-indigo-600 to-purple-600 text-white p-6 sm:p-8 rounded-3xl shadow-2xl text-center max-w-sm sm:max-w-md w-full animate-pop-in z-10 border border-white/20">
+      <div class="w-16 h-16 mx-auto mb-3 bg-white/20 rounded-2xl flex items-center justify-center text-3xl shadow-inner backdrop-blur-md">
+        🎉
+      </div>
+      <h2 id="successTitle" class="text-2xl sm:text-3xl font-extrabold mb-2">任務完成！</h2>
+      <p id="successMessage" class="text-sm sm:text-base text-white/90 mb-6 leading-relaxed">
+        您的字幕已華麗變身！<br>準備好用更精彩的內容驚艷世界吧！🚀
+      </p>
+      <button id="closeSuccessBtn" class="w-full py-3 bg-white text-indigo-600 font-extrabold text-sm sm:text-base rounded-xl shadow-lg hover:bg-indigo-50 transition transform hover:scale-[1.02] active:scale-95">
+        太棒了！
+      </button>
+    </div>
+  </div>
+
+  <!-- Toast Notification Container -->
+  <div id="toastContainer"></div>
+
+  <!-- App Script Entry -->
+  <script type="module" src="src/app.js"></script>
+</body>
+</html>

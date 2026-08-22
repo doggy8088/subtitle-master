@@ -1,0 +1,13 @@
+# Logs and runtime
+node_modules/
+dist/
+.DS_Store
+*.log
+.vscode/
+.idea/
+
+# Local subprojects kept for reference
+/srt2vtt/
+/vtt2ass/
+/subembed/
+/subtitle-correction-agent/
