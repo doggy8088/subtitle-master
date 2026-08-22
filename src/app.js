@@ -1,15 +1,18 @@
 /**
- * Subtitle Master - Main Application Controller
+ * Subtitle Master - Studio Grade Application Controller
  */
 
 import { convertSubtitle, detectFormat, getFormatExtension, getFormatMimeType, ASS_PRESETS } from './converter.js';
-import { decodeBuffer, SUPPORTED_ENCODINGS } from './utils/encoding.js';
+import { decodeBuffer } from './utils/encoding.js';
 import { SAMPLE_SUBTITLES } from './utils/sampleSubtitles.js';
 import { toast } from './ui/toast.js';
 import { celebration } from './ui/confetti.js';
 import { formatSecondsToVtt, formatDuration } from './utils/time.js';
+import { SubtitlePlayer } from './ui/player.js';
+import { inspectCues, autoFixCues } from './ui/diagnostics.js';
+import { CommandPalette } from './ui/commandPalette.js';
 
-class SubtitleApp {
+class SubtitleStudioApp {
   constructor() {
     this.state = {
       sourceText: '',
@@ -21,16 +24,18 @@ class SubtitleApp {
       assPreset: 'classicYellow',
       assCustomStyle: { ...ASS_PRESETS.classicYellow },
       txtWithTimestamps: false,
-      activeRightView: 'raw', // 'raw' | 'table' | 'screen'
-      activeMobileTab: 'input', // 'input' | 'output' | 'preview'
-      currentPreviewCueIndex: 0,
+      activeRightView: 'raw', // 'raw' | 'table' | 'player' | 'style'
+      activeMobileTab: 'input', // 'input' | 'output' | 'player'
       batchFiles: [],
       isBatchMode: false,
       cues: [],
       stats: null,
-      theme: 'dark' // 'dark' | 'light'
+      diagnostics: { issues: [], health: 'empty' },
+      theme: 'dark'
     };
 
+    this.player = null;
+    this.commandPalette = null;
     this.debounceTimer = null;
     this.init();
   }
@@ -38,8 +43,10 @@ class SubtitleApp {
   init() {
     this.initTheme();
     this.bindDomElements();
+    this.initPlayer();
     this.bindEvents();
-    this.loadInitialSample();
+    this.commandPalette = new CommandPalette(this);
+    this.loadSample('srt');
   }
 
   initTheme() {
@@ -58,8 +65,8 @@ class SubtitleApp {
     const themeIcon = document.getElementById('themeIcon');
     if (themeIcon) {
       themeIcon.innerHTML = this.state.theme === 'dark' 
-        ? '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 3v1m0 16v1m9-9h-1M4 9h-1m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z"></path></svg>'
-        : '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z"></path></svg>';
+        ? '<i class="fa-solid fa-sun text-amber-400"></i>'
+        : '<i class="fa-solid fa-moon text-indigo-600"></i>';
     }
   }
 
@@ -67,15 +74,17 @@ class SubtitleApp {
     this.state.theme = this.state.theme === 'dark' ? 'light' : 'dark';
     localStorage.setItem('sm_theme', this.state.theme);
     this.applyTheme();
+    toast.show(`已切換為${this.state.theme === 'dark' ? '深色' : '淺色'}模式`, 'info', 1500);
   }
 
   bindDomElements() {
     this.dom = {
-      // Inputs & Textareas
+      // Main textareas & drop zones
       sourceInput: document.getElementById('sourceInput'),
       targetOutput: document.getElementById('targetOutput'),
       fileInput: document.getElementById('fileInput'),
       dropZone: document.getElementById('dropZone'),
+      globalDropOverlay: document.getElementById('globalDropOverlay'),
       
       // Selectors & Badges
       sourceFormatSelect: document.getElementById('sourceFormatSelect'),
@@ -83,7 +92,7 @@ class SubtitleApp {
       detectedBadge: document.getElementById('detectedBadge'),
       statsBadge: document.getElementById('statsBadge'),
       fileInfoText: document.getElementById('fileInfoText'),
-      encodingSelect: document.getElementById('encodingSelect'),
+      diagnosticBadge: document.getElementById('diagnosticBadge'),
       
       // Time Offset Controls
       timeOffsetDisplay: document.getElementById('timeOffsetDisplay'),
@@ -93,31 +102,55 @@ class SubtitleApp {
       btnTimePlus1: document.getElementById('btnTimePlus1'),
       btnTimeReset: document.getElementById('btnTimeReset'),
       
-      // Buttons
+      // Header & Quick Action Buttons
       btnSwapFormat: document.getElementById('btnSwapFormat'),
       btnClear: document.getElementById('btnClear'),
       btnCopy: document.getElementById('btnCopy'),
       btnDownload: document.getElementById('btnDownload'),
       btnSample: document.getElementById('btnSample'),
-      btnAssModal: document.getElementById('btnAssModal'),
       themeToggleBtn: document.getElementById('themeToggleBtn'),
+      btnCommandPalette: document.getElementById('btnCommandPalette'),
+      btnFindReplace: document.getElementById('btnFindReplace'),
+      btnAutoFix: document.getElementById('btnAutoFix'),
       
-      // Views & Tabs
+      // View Switcher Tabs
       viewRawBtn: document.getElementById('viewRawBtn'),
       viewTableBtn: document.getElementById('viewTableBtn'),
-      viewScreenBtn: document.getElementById('viewScreenBtn'),
+      viewPlayerBtn: document.getElementById('viewPlayerBtn'),
+      viewStyleBtn: document.getElementById('viewStyleBtn'),
       viewRawContainer: document.getElementById('viewRawContainer'),
       viewTableContainer: document.getElementById('viewTableContainer'),
-      viewScreenContainer: document.getElementById('viewScreenContainer'),
+      viewPlayerContainer: document.getElementById('viewPlayerContainer'),
+      viewStyleContainer: document.getElementById('viewStyleContainer'),
       tableBody: document.getElementById('tableBody'),
       
-      // Screen Preview
-      previewScreenText: document.getElementById('previewScreenText'),
-      previewCueCounter: document.getElementById('previewCueCounter'),
-      previewTimeText: document.getElementById('previewTimeText'),
-      btnPrevCue: document.getElementById('btnPrevCue'),
-      btnNextCue: document.getElementById('btnNextCue'),
-      previewTimelineSlider: document.getElementById('previewTimelineSlider'),
+      // Player Controls
+      playerSubtitleText: document.getElementById('playerSubtitleText'),
+      playerTimeDisplay: document.getElementById('playerTimeDisplay'),
+      playerPlayBtn: document.getElementById('playerPlayBtn'),
+      playerScrubber: document.getElementById('playerScrubber'),
+      playerSpeedSelect: document.getElementById('playerSpeedSelect'),
+      playerPrevBtn: document.getElementById('playerPrevBtn'),
+      playerNextBtn: document.getElementById('playerNextBtn'),
+      
+      // ASS Style Studio Controls
+      stylePresetSelect: document.getElementById('stylePresetSelect'),
+      styleFontFamily: document.getElementById('styleFontFamily'),
+      styleFontSize: document.getElementById('styleFontSize'),
+      styleFontSizeVal: document.getElementById('styleFontSizeVal'),
+      styleTextColor: document.getElementById('styleTextColor'),
+      styleOutlineColor: document.getElementById('styleOutlineColor'),
+      styleShadowColor: document.getElementById('styleShadowColor'),
+      styleOutlineSize: document.getElementById('styleOutlineSize'),
+      styleOutlineSizeVal: document.getElementById('styleOutlineSizeVal'),
+      stylePreviewBox: document.getElementById('stylePreviewBox'),
+      
+      // Find & Replace Modal
+      findModal: document.getElementById('findModal'),
+      findInput: document.getElementById('findInput'),
+      replaceInput: document.getElementById('replaceInput'),
+      btnExecuteReplace: document.getElementById('btnExecuteReplace'),
+      btnCloseFindModal: document.getElementById('btnCloseFindModal'),
       
       // Batch Mode Elements
       batchContainer: document.getElementById('batchContainer'),
@@ -125,25 +158,12 @@ class SubtitleApp {
       btnBatchDownloadAll: document.getElementById('btnBatchDownloadAll'),
       btnExitBatch: document.getElementById('btnExitBatch'),
       
-      // Mobile Tab Controls
+      // Mobile Navigation
       tabInputBtn: document.getElementById('tabInputBtn'),
       tabOutputBtn: document.getElementById('tabOutputBtn'),
-      tabPreviewBtn: document.getElementById('tabPreviewBtn'),
+      tabPlayerBtn: document.getElementById('tabPlayerBtn'),
       mobileInputPane: document.getElementById('mobileInputPane'),
       mobileOutputPane: document.getElementById('mobileOutputPane'),
-      
-      // ASS Style Modal
-      assModal: document.getElementById('assModal'),
-      btnSaveAssModal: document.getElementById('btnSaveAssModal'),
-      btnCloseAssModal: document.getElementById('btnCloseAssModal'),
-      assPresetSelect: document.getElementById('assPresetSelect'),
-      assFontName: document.getElementById('assFontName'),
-      assFontSize: document.getElementById('assFontSize'),
-      assFontColor: document.getElementById('assFontColor'),
-      assOutlineColor: document.getElementById('assOutlineColor'),
-      assShadowColor: document.getElementById('assShadowColor'),
-      assOutlineSize: document.getElementById('assOutlineSize'),
-      assAlignment: document.getElementById('assAlignment'),
       
       // Celebration Modal
       successOverlay: document.getElementById('successOverlay'),
@@ -151,8 +171,28 @@ class SubtitleApp {
     };
   }
 
+  initPlayer() {
+    this.player = new SubtitlePlayer({
+      onTimeUpdate: (curr, dur) => {
+        if (this.dom.playerTimeDisplay) {
+          this.dom.playerTimeDisplay.textContent = `${formatSecondsToVtt(curr)} / ${formatSecondsToVtt(dur)}`;
+        }
+        if (this.dom.playerScrubber) {
+          this.dom.playerScrubber.max = dur;
+          this.dom.playerScrubber.value = curr;
+        }
+      },
+      onCueChange: (cue) => {
+        if (this.dom.playerSubtitleText) {
+          this.dom.playerSubtitleText.textContent = cue ? (cue.text || '') : '';
+        }
+        this.highlightActiveTableRow(cue);
+      }
+    });
+  }
+
   bindEvents() {
-    // 1. Text input real-time conversion
+    // 1. Text input real-time debounce conversion
     this.dom.sourceInput.addEventListener('input', () => {
       this.state.sourceText = this.dom.sourceInput.value;
       this.debounceProcess();
@@ -167,20 +207,13 @@ class SubtitleApp {
     this.dom.targetFormatSelect.addEventListener('change', (e) => {
       this.state.targetFormat = e.target.value;
       this.processConversion();
-      this.checkAssStyleVisibility();
     });
 
     // 3. Quick preset format buttons
     document.querySelectorAll('[data-quick-format]').forEach(btn => {
       btn.addEventListener('click', (e) => {
         const [src, tgt] = e.currentTarget.dataset.quickFormat.split('->');
-        if (src) this.state.sourceFormat = src;
-        if (tgt) this.state.targetFormat = tgt;
-        this.dom.sourceFormatSelect.value = src;
-        this.dom.targetFormatSelect.value = tgt;
-        this.processConversion();
-        this.checkAssStyleVisibility();
-        toast.show(`已切換為 ${src.toUpperCase()} ➔ ${tgt.toUpperCase()} 轉換模式`, 'info');
+        this.setQuickFormat(src, tgt);
       });
     });
 
@@ -194,39 +227,51 @@ class SubtitleApp {
       this.dom.sourceFormatSelect.value = oldTgt;
       this.dom.targetFormatSelect.value = oldSrc;
 
-      // Swap contents if target has output
       if (this.dom.targetOutput.value.trim()) {
         this.state.sourceText = this.dom.targetOutput.value;
         this.dom.sourceInput.value = this.state.sourceText;
       }
       this.processConversion();
-      this.checkAssStyleVisibility();
-      toast.show('已交換來源與目標格式', 'info');
+      toast.show('已交換來源與目標格式 ⇄', 'info');
     });
 
-    // 5. Drag and Drop events
-    const preventDefaults = (e) => { e.preventDefault(); e.stopPropagation(); };
-    ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(evt => {
-      document.body.addEventListener(evt, preventDefaults, false);
-      this.dom.dropZone.addEventListener(evt, preventDefaults, false);
+    // 5. Full-Screen Drag & Drop Overlay
+    let dragCounter = 0;
+    window.addEventListener('dragenter', (e) => {
+      e.preventDefault();
+      dragCounter++;
+      if (this.dom.globalDropOverlay) {
+        this.dom.globalDropOverlay.classList.remove('hidden');
+        this.dom.globalDropOverlay.classList.add('flex');
+      }
     });
 
-    ['dragenter', 'dragover'].forEach(evt => {
-      this.dom.dropZone.addEventListener(evt, () => this.dom.dropZone.classList.add('drop-active'));
+    window.addEventListener('dragleave', (e) => {
+      e.preventDefault();
+      dragCounter--;
+      if (dragCounter <= 0 && this.dom.globalDropOverlay) {
+        dragCounter = 0;
+        this.dom.globalDropOverlay.classList.add('hidden');
+        this.dom.globalDropOverlay.classList.remove('flex');
+      }
     });
 
-    ['dragleave', 'drop'].forEach(evt => {
-      this.dom.dropZone.addEventListener(evt, () => this.dom.dropZone.classList.remove('drop-active'));
-    });
+    window.addEventListener('dragover', (e) => e.preventDefault());
 
-    this.dom.dropZone.addEventListener('drop', (e) => {
+    window.addEventListener('drop', (e) => {
+      e.preventDefault();
+      dragCounter = 0;
+      if (this.dom.globalDropOverlay) {
+        this.dom.globalDropOverlay.classList.add('hidden');
+        this.dom.globalDropOverlay.classList.remove('flex');
+      }
       const files = Array.from(e.dataTransfer.files || []);
       if (files.length > 0) {
         this.handleUploadedFiles(files);
       }
     });
 
-    // 6. Click upload file
+    // File input picker
     this.dom.fileInput.addEventListener('change', (e) => {
       const files = Array.from(e.target.files || []);
       if (files.length > 0) {
@@ -234,73 +279,99 @@ class SubtitleApp {
       }
     });
 
-    // 7. Time offset buttons
+    // 6. Time offset buttons
     this.dom.btnTimeMinus1.addEventListener('click', () => this.adjustTimeOffset(-1.0));
     this.dom.btnTimeMinus05.addEventListener('click', () => this.adjustTimeOffset(-0.5));
     this.dom.btnTimePlus05.addEventListener('click', () => this.adjustTimeOffset(+0.5));
     this.dom.btnTimePlus1.addEventListener('click', () => this.adjustTimeOffset(+1.0));
     this.dom.btnTimeReset.addEventListener('click', () => this.resetTimeOffset());
 
-    // 8. Action buttons
+    // 7. Action buttons
     this.dom.btnClear.addEventListener('click', () => this.clearAll());
     this.dom.btnCopy.addEventListener('click', () => this.copyToClipboard());
     this.dom.btnDownload.addEventListener('click', () => this.downloadConvertedFile());
     this.dom.btnSample.addEventListener('click', () => this.loadSample());
     this.dom.themeToggleBtn.addEventListener('click', () => this.toggleTheme());
+    this.dom.btnCommandPalette?.addEventListener('click', () => this.commandPalette?.toggle());
 
-    // 9. View Mode switch (Raw / Table / Screen preview)
+    // 8. View Switcher buttons
     this.dom.viewRawBtn.addEventListener('click', () => this.switchRightView('raw'));
     this.dom.viewTableBtn.addEventListener('click', () => this.switchRightView('table'));
-    this.dom.viewScreenBtn.addEventListener('click', () => this.switchRightView('screen'));
+    this.dom.viewPlayerBtn.addEventListener('click', () => this.switchRightView('player'));
+    this.dom.viewStyleBtn.addEventListener('click', () => this.switchRightView('style'));
 
-    // 10. Screen Preview stepper & slider
-    this.dom.btnPrevCue.addEventListener('click', () => this.stepPreviewCue(-1));
-    this.dom.btnNextCue.addEventListener('click', () => this.stepPreviewCue(1));
-    this.dom.previewTimelineSlider.addEventListener('input', (e) => {
-      this.state.currentPreviewCueIndex = parseInt(e.target.value, 10);
-      this.updateScreenPreview();
+    // 9. Live Player Events
+    this.dom.playerPlayBtn.addEventListener('click', () => this.togglePlayerPlay());
+    this.dom.playerScrubber.addEventListener('input', (e) => {
+      const time = parseFloat(e.target.value);
+      this.player.seek(time);
     });
+    this.dom.playerSpeedSelect.addEventListener('change', (e) => {
+      this.player.setPlaybackRate(parseFloat(e.target.value));
+    });
+    this.dom.playerPrevBtn.addEventListener('click', () => this.stepPlayerCue(-1));
+    this.dom.playerNextBtn.addEventListener('click', () => this.stepPlayerCue(1));
 
-    // 11. ASS Modal events
-    this.dom.btnAssModal.addEventListener('click', () => this.openAssModal());
-    this.dom.btnCloseAssModal.addEventListener('click', () => this.closeAssModal());
-    this.dom.btnSaveAssModal.addEventListener('click', () => this.saveAssModal());
-    this.dom.assPresetSelect.addEventListener('change', (e) => this.applyAssPresetToModal(e.target.value));
+    // 10. ASS Style Studio Controls
+    this.dom.stylePresetSelect?.addEventListener('change', (e) => this.applyPresetFromStudio(e.target.value));
+    this.dom.styleFontFamily?.addEventListener('input', () => this.updateCustomStyleFromStudio());
+    this.dom.styleFontSize?.addEventListener('input', (e) => {
+      if (this.dom.styleFontSizeVal) this.dom.styleFontSizeVal.textContent = `${e.target.value}px`;
+      this.updateCustomStyleFromStudio();
+    });
+    this.dom.styleOutlineSize?.addEventListener('input', (e) => {
+      if (this.dom.styleOutlineSizeVal) this.dom.styleOutlineSizeVal.textContent = `${e.target.value}px`;
+      this.updateCustomStyleFromStudio();
+    });
+    this.dom.styleTextColor?.addEventListener('input', () => this.updateCustomStyleFromStudio());
+    this.dom.styleOutlineColor?.addEventListener('input', () => this.updateCustomStyleFromStudio());
+    this.dom.styleShadowColor?.addEventListener('input', () => this.updateCustomStyleFromStudio());
 
-    // 12. Celebration Modal close
-    this.dom.closeSuccessBtn.addEventListener('click', () => celebration.stop());
-    this.dom.successOverlay.addEventListener('click', (e) => {
+    // 11. Find & Replace Modal
+    this.dom.btnFindReplace?.addEventListener('click', () => this.openFindModal());
+    this.dom.btnCloseFindModal?.addEventListener('click', () => this.closeFindModal());
+    this.dom.btnExecuteReplace?.addEventListener('click', () => this.executeFindReplace());
+
+    // 12. Auto-Fix diagnostics button
+    this.dom.btnAutoFix?.addEventListener('click', () => this.autoFixIssues());
+
+    // 13. Mobile Navigation
+    this.dom.tabInputBtn?.addEventListener('click', () => this.switchMobileTab('input'));
+    this.dom.tabOutputBtn?.addEventListener('click', () => this.switchMobileTab('output'));
+    this.dom.tabPlayerBtn?.addEventListener('click', () => this.switchMobileTab('player'));
+
+    // 14. Batch mode controls
+    this.dom.btnExitBatch?.addEventListener('click', () => this.exitBatchMode());
+    this.dom.btnBatchDownloadAll?.addEventListener('click', () => this.downloadAllBatchAsZip());
+
+    // 15. Celebration overlay
+    this.dom.closeSuccessBtn?.addEventListener('click', () => celebration.stop());
+    this.dom.successOverlay?.addEventListener('click', (e) => {
       if (e.target === this.dom.successOverlay) celebration.stop();
     });
 
-    // 13. Mobile Tab switcher
-    if (this.dom.tabInputBtn && this.dom.tabOutputBtn) {
-      this.dom.tabInputBtn.addEventListener('click', () => this.switchMobileTab('input'));
-      this.dom.tabOutputBtn.addEventListener('click', () => this.switchMobileTab('output'));
-      if (this.dom.tabPreviewBtn) {
-        this.dom.tabPreviewBtn.addEventListener('click', () => this.switchMobileTab('preview'));
-      }
-    }
-
-    // 14. Batch mode buttons
-    if (this.dom.btnExitBatch) {
-      this.dom.btnExitBatch.addEventListener('click', () => this.exitBatchMode());
-    }
-    if (this.dom.btnBatchDownloadAll) {
-      this.dom.btnBatchDownloadAll.addEventListener('click', () => this.downloadAllBatchAsZip());
-    }
-
-    // 15. Global keyboard shortcuts
+    // 16. Keyboard Shortcuts
     window.addEventListener('keydown', (e) => {
-      if ((e.ctrlKey || e.metaKey) && e.key === 's') {
+      // Spacebar plays/pauses if in player view and not focusing on textarea/input
+      if (e.code === 'Space' && !['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement.tagName)) {
+        e.preventDefault();
+        this.togglePlayerPlay();
+      }
+      // ⌘S or Ctrl+S to download
+      if ((e.metaKey || e.ctrlKey) && e.key === 's') {
         e.preventDefault();
         this.downloadConvertedFile();
       }
     });
   }
 
-  loadInitialSample() {
-    this.loadSample('srt');
+  setQuickFormat(src, tgt) {
+    if (src) this.state.sourceFormat = src;
+    if (tgt) this.state.targetFormat = tgt;
+    this.dom.sourceFormatSelect.value = src;
+    this.dom.targetFormatSelect.value = tgt;
+    this.processConversion();
+    toast.show(`已切換為 ${src.toUpperCase()} ➔ ${tgt.toUpperCase()} 轉換模式`, 'info');
   }
 
   loadSample(format = 'srt') {
@@ -316,14 +387,13 @@ class SubtitleApp {
     this.dom.targetFormatSelect.value = this.state.targetFormat;
     this.updateTimeOffsetDisplay();
     this.processConversion();
-    this.checkAssStyleVisibility();
   }
 
   debounceProcess() {
     clearTimeout(this.debounceTimer);
     this.debounceTimer = setTimeout(() => {
       this.processConversion();
-    }, 150);
+    }, 120);
   }
 
   processConversion() {
@@ -342,17 +412,26 @@ class SubtitleApp {
     this.state.cues = result.cues;
     this.state.stats = result.stats;
 
-    // Update Raw Output
+    // Run health diagnostics
+    this.state.diagnostics = inspectCues(result.cues);
+
+    // Update Output
     this.dom.targetOutput.value = result.output;
 
-    // Update Badges & UI stats
+    // Update Badges & UI
     this.updateBadges(result.stats);
+    this.updateDiagnosticsUI();
 
-    // Update Table & Screen Preview
+    // Reload player cues
+    this.player.loadCues(result.cues);
+
+    // Update Table View
     this.renderTableView();
-    this.updateScreenPreview();
 
-    // Enable/disable download button
+    // Update Style Studio Preview
+    this.updateStyleStudioVisual();
+
+    // Enable/disable buttons
     this.dom.btnDownload.disabled = result.cues.length === 0;
     this.dom.btnCopy.disabled = !result.output || result.output.trim() === '' || result.output.trim() === 'WEBVTT';
   }
@@ -360,22 +439,44 @@ class SubtitleApp {
   updateBadges(stats) {
     if (!stats || stats.cueCount === 0) {
       this.dom.detectedBadge.textContent = '未檢測到字幕';
-      this.dom.detectedBadge.className = 'px-2.5 py-1 text-xs font-semibold rounded-full bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-400';
+      this.dom.detectedBadge.className = 'px-2 py-0.5 text-[10px] font-bold rounded-full bg-slate-200 dark:bg-slate-800 text-slate-500 dark:text-slate-400';
       this.dom.statsBadge.textContent = '0 條字幕 · 0 字';
       return;
     }
 
     const fmt = (stats.detectedSourceFormat || 'srt').toUpperCase();
-    this.dom.detectedBadge.textContent = `來源: ${fmt} (${stats.cueCount} 句)`;
-    this.dom.detectedBadge.className = 'px-2.5 py-1 text-xs font-semibold rounded-full bg-indigo-100 dark:bg-indigo-900/60 text-indigo-700 dark:text-indigo-300';
-    this.dom.statsBadge.textContent = `${stats.charCount} 字 · 時長 ${stats.durationFormatted}`;
+    this.dom.detectedBadge.textContent = `✨ ${fmt} (${stats.cueCount} 句)`;
+    this.dom.detectedBadge.className = 'px-2.5 py-0.5 text-[11px] font-bold rounded-full bg-indigo-100 dark:bg-indigo-950/80 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800';
+    this.dom.statsBadge.textContent = `時長 ${stats.durationFormatted} · ${stats.charCount} 字 · ${stats.cueCount} 句`;
+  }
+
+  updateDiagnosticsUI() {
+    if (!this.dom.diagnosticBadge) return;
+    const { issues, health } = this.state.diagnostics;
+
+    if (health === 'empty' || issues.length === 0) {
+      this.dom.diagnosticBadge.innerHTML = `<i class="fa-solid fa-circle-check text-emerald-500 mr-1"></i>品質優良`;
+      this.dom.diagnosticBadge.className = 'text-[11px] font-medium text-emerald-600 dark:text-emerald-400 flex items-center';
+      if (this.dom.btnAutoFix) this.dom.btnAutoFix.classList.add('hidden');
+    } else {
+      this.dom.diagnosticBadge.innerHTML = `<i class="fa-solid fa-triangle-exclamation text-amber-500 mr-1"></i>發現 ${issues.length} 項問題`;
+      this.dom.diagnosticBadge.className = 'text-[11px] font-medium text-amber-600 dark:text-amber-400 flex items-center cursor-pointer hover:underline';
+      if (this.dom.btnAutoFix) this.dom.btnAutoFix.classList.remove('hidden');
+    }
+  }
+
+  autoFixIssues() {
+    const fixed = autoFixCues(this.state.cues);
+    this.state.cues = fixed;
+    this.rebuildSourceFromCues();
+    toast.show('已自動修復時間軸重疊與時長問題！✨', 'success');
   }
 
   adjustTimeOffset(delta) {
     this.state.timeOffset = Math.round((this.state.timeOffset + delta) * 10) / 10;
     this.updateTimeOffsetDisplay();
     this.processConversion();
-    toast.show(`時間軸平移: ${this.state.timeOffset > 0 ? '+' : ''}${this.state.timeOffset} 秒`, 'info');
+    toast.show(`時間軸平移: ${this.state.timeOffset > 0 ? '+' : ''}${this.state.timeOffset}s`, 'info', 1200);
   }
 
   resetTimeOffset() {
@@ -383,16 +484,16 @@ class SubtitleApp {
     this.state.timeOffset = 0;
     this.updateTimeOffsetDisplay();
     this.processConversion();
-    toast.show('時間軸平移已歸零', 'info');
+    toast.show('時間軸已重設為 0.0s', 'info', 1200);
   }
 
   updateTimeOffsetDisplay() {
     const offset = this.state.timeOffset;
     this.dom.timeOffsetDisplay.textContent = `${offset > 0 ? '+' : ''}${offset.toFixed(1)}s`;
     if (offset !== 0) {
-      this.dom.timeOffsetDisplay.className = 'font-mono text-xs px-2 py-0.5 rounded font-bold bg-amber-500/20 text-amber-600 dark:text-amber-400';
+      this.dom.timeOffsetDisplay.className = 'font-mono text-xs px-2 py-0.5 rounded-md font-bold bg-amber-500/20 text-amber-600 dark:text-amber-400 border border-amber-500/30';
     } else {
-      this.dom.timeOffsetDisplay.className = 'font-mono text-xs px-2 py-0.5 rounded font-medium text-slate-500 dark:text-slate-400';
+      this.dom.timeOffsetDisplay.className = 'font-mono text-xs px-2 py-0.5 rounded-md font-medium text-slate-500 dark:text-slate-400';
     }
   }
 
@@ -400,7 +501,6 @@ class SubtitleApp {
     if (files.length === 0) return;
 
     if (files.length === 1) {
-      // Single file mode
       const file = files[0];
       this.state.currentFilename = file.name;
       this.dom.fileInfoText.textContent = `📄 ${file.name} (${(file.size / 1024).toFixed(1)} KB)`;
@@ -412,12 +512,10 @@ class SubtitleApp {
         this.state.sourceText = text;
         this.dom.sourceInput.value = text;
 
-        // Auto-detect format & recommend target
         const detected = detectFormat(text, file.name);
         this.state.sourceFormat = detected;
         this.dom.sourceFormatSelect.value = detected;
 
-        // Smart target selection: if SRT -> VTT; if VTT -> ASS; if ASS -> SRT
         if (detected === 'srt') this.state.targetFormat = 'vtt';
         else if (detected === 'vtt') this.state.targetFormat = 'ass';
         else if (detected === 'ass' || detected === 'ssa') this.state.targetFormat = 'srt';
@@ -427,15 +525,13 @@ class SubtitleApp {
         this.state.timeOffset = 0;
         this.updateTimeOffsetDisplay();
         this.processConversion();
-        this.checkAssStyleVisibility();
 
         celebration.trigger('🎉 檔案載入成功！', `已成功載入 <strong>${file.name}</strong> (${encoding.toUpperCase()})，並自動轉為 <strong>${this.state.targetFormat.toUpperCase()}</strong>！🌟`);
       } catch (err) {
-        console.error('File read error:', err);
-        toast.show(`讀取檔案失敗: ${err.message}`, 'error');
+        console.error('File load error:', err);
+        toast.show(`載入檔案失敗: ${err.message}`, 'error');
       }
     } else {
-      // Multiple files - Batch mode
       this.setupBatchMode(files);
     }
   }
@@ -445,12 +541,12 @@ class SubtitleApp {
     this.dom.batchContainer.classList.remove('hidden');
     this.dom.viewRawContainer.classList.add('hidden');
     this.dom.viewTableContainer.classList.add('hidden');
-    this.dom.viewScreenContainer.classList.add('hidden');
+    this.dom.viewPlayerContainer.classList.add('hidden');
+    this.dom.viewStyleContainer.classList.add('hidden');
 
     this.state.batchFiles = [];
     this.dom.batchFileList.innerHTML = '';
-
-    toast.show(`已載入 ${files.length} 個檔案，正在進行批次轉換...`, 'info');
+    toast.show(`正在批次處理 ${files.length} 個檔案...`, 'info');
 
     for (let i = 0; i < files.length; i++) {
       const file = files[i];
@@ -493,30 +589,30 @@ class SubtitleApp {
     }
 
     this.renderBatchList();
-    celebration.trigger('🎉 批次轉換完成！', `已成功為您處理 <strong>${files.length}</strong> 個字幕檔案！您可以個別下載或一鍵打包 ZIP 匯出！📦`);
+    celebration.trigger('📦 批次轉換完成！', `已為您成功轉換 <strong>${files.length}</strong> 個字幕檔案！可個別下載或一鍵打包 ZIP 匯出！✨`);
   }
 
   renderBatchList() {
     this.dom.batchFileList.innerHTML = this.state.batchFiles.map(f => {
       if (f.status === 'done') {
         return `
-          <div class="flex items-center justify-between p-3 bg-white dark:bg-slate-700/60 rounded-lg border border-slate-200 dark:border-slate-600 shadow-sm">
-            <div class="flex items-center space-x-3 overflow-hidden">
-              <span class="text-xl">📄</span>
+          <div class="flex items-center justify-between p-3 bg-white dark:bg-slate-800/80 rounded-xl border border-slate-200 dark:border-slate-700/80 shadow-sm">
+            <div class="flex items-center space-x-3 overflow-hidden min-w-0">
+              <span class="text-xl flex-shrink-0">📄</span>
               <div class="truncate">
-                <div class="font-medium text-slate-800 dark:text-slate-100 truncate">${f.name} ➔ <span class="text-indigo-600 dark:text-indigo-400 font-bold">${f.outName}</span></div>
-                <div class="text-xs text-slate-500 dark:text-slate-400">${f.cuesCount} 條字幕 · ${(f.size / 1024).toFixed(1)} KB</div>
+                <div class="font-bold text-xs sm:text-sm text-slate-800 dark:text-slate-100 truncate">${f.name} ➔ <span class="text-indigo-600 dark:text-indigo-400">${f.outName}</span></div>
+                <div class="text-[11px] text-slate-500 dark:text-slate-400">${f.cuesCount} 條字幕 · ${(f.size / 1024).toFixed(1)} KB</div>
               </div>
             </div>
-            <button data-batch-download="${f.id}" class="flex-shrink-0 px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold rounded-md shadow transition">
+            <button data-batch-download="${f.id}" class="flex-shrink-0 px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-lg shadow transition active:scale-95">
               下載
             </button>
           </div>
         `;
       }
       return `
-        <div class="flex items-center justify-between p-3 bg-rose-50 dark:bg-rose-900/30 rounded-lg border border-rose-200 dark:border-rose-800">
-          <div class="text-sm text-rose-700 dark:text-rose-300 font-medium">${f.name}: 轉換失敗 (${f.error})</div>
+        <div class="flex items-center justify-between p-3 bg-rose-50 dark:bg-rose-950/40 rounded-xl border border-rose-200 dark:border-rose-800">
+          <div class="text-xs text-rose-700 dark:text-rose-300 font-medium">${f.name}: 轉換失敗 (${f.error})</div>
         </div>
       `;
     }).join('');
@@ -526,27 +622,23 @@ class SubtitleApp {
         const id = parseInt(e.currentTarget.dataset.batchDownload, 10);
         const item = this.state.batchFiles.find(b => b.id === id);
         if (item) {
-          this.downloadSingleBatchFile(item);
+          const blob = new Blob([new Uint8Array([0xEF, 0xBB, 0xBF]), item.output], { type: getFormatMimeType(item.targetFormat) });
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = item.outName;
+          document.body.appendChild(a);
+          a.click();
+          document.body.removeChild(a);
+          URL.revokeObjectURL(url);
         }
       });
     });
   }
 
-  downloadSingleBatchFile(item) {
-    const blob = new Blob([new Uint8Array([0xEF, 0xBB, 0xBF]), item.output], { type: getFormatMimeType(item.targetFormat) });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = item.outName;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-  }
-
   async downloadAllBatchAsZip() {
     if (!window.JSZip) {
-      toast.show('ZIP 工具載入中，請稍候...', 'info');
+      toast.show('正在加載 ZIP 工具...', 'info');
       return;
     }
     const zip = new window.JSZip();
@@ -560,12 +652,12 @@ class SubtitleApp {
     const url = URL.createObjectURL(content);
     const a = document.createElement('a');
     a.href = url;
-    a.download = 'converted_subtitles.zip';
+    a.download = 'subtitles_converted.zip';
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
-    toast.show('已下載 ZIP 打包檔案！📦', 'success');
+    toast.show('ZIP 打包下載已開始！📦', 'success');
   }
 
   exitBatchMode() {
@@ -584,7 +676,7 @@ class SubtitleApp {
     this.state.timeOffset = 0;
     this.updateTimeOffsetDisplay();
     this.processConversion();
-    toast.show('已清除全部內容', 'info');
+    toast.show('內容已全部清空', 'info');
   }
 
   async copyToClipboard() {
@@ -596,14 +688,12 @@ class SubtitleApp {
 
     try {
       await navigator.clipboard.writeText(text);
-      celebration.trigger('✨ 複製成功！ ✨', '轉換後的字幕已成功複製到剪貼簿，立即貼上使用吧！🚀');
-      toast.show('已成功複製到剪貼簿！', 'success');
+      celebration.trigger('✨ 複製成功！ ✨', '字幕內容已成功寫入剪貼簿，立即貼上使用吧！🚀');
+      toast.show('已複製到剪貼簿！', 'success');
     } catch (e) {
-      console.warn('Clipboard write failed:', e);
-      // Fallback
       this.dom.targetOutput.select();
       document.execCommand('copy');
-      toast.show('已成功複製到剪貼簿！', 'success');
+      toast.show('已複製到剪貼簿！', 'success');
     }
   }
 
@@ -619,7 +709,6 @@ class SubtitleApp {
     const baseName = this.state.currentFilename.replace(/\.[^/.]+$/, '') || 'subtitle';
     const filename = `${baseName}${targetExt}`;
 
-    // Add UTF-8 BOM
     const BOM = new Uint8Array([0xEF, 0xBB, 0xBF]);
     const encoded = new TextEncoder().encode(content);
     const blob = new Blob([BOM, encoded], { type: getFormatMimeType(targetFmt) });
@@ -636,15 +725,6 @@ class SubtitleApp {
     celebration.trigger('🎉 檔案下載成功！', `已為您成功匯出 <strong>${filename}</strong>！✨`);
   }
 
-  checkAssStyleVisibility() {
-    const isAss = this.state.targetFormat === 'ass' || this.state.targetFormat === 'ssa';
-    if (isAss) {
-      this.dom.btnAssModal.classList.remove('hidden');
-    } else {
-      this.dom.btnAssModal.classList.add('hidden');
-    }
-  }
-
   switchRightView(view) {
     this.state.activeRightView = view;
     if (this.state.isBatchMode) {
@@ -652,50 +732,99 @@ class SubtitleApp {
       this.state.isBatchMode = false;
     }
 
-    // Toggle button active classes
     const activeClass = 'bg-indigo-600 text-white shadow-sm';
-    const inactiveClass = 'text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700';
+    const inactiveClass = 'text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700/60';
 
-    this.dom.viewRawBtn.className = `px-3 py-1 text-xs font-semibold rounded-md transition ${view === 'raw' ? activeClass : inactiveClass}`;
-    this.dom.viewTableBtn.className = `px-3 py-1 text-xs font-semibold rounded-md transition ${view === 'table' ? activeClass : inactiveClass}`;
-    this.dom.viewScreenBtn.className = `px-3 py-1 text-xs font-semibold rounded-md transition ${view === 'screen' ? activeClass : inactiveClass}`;
+    this.dom.viewRawBtn.className = `px-2.5 py-1 text-xs font-bold rounded-lg transition ${view === 'raw' ? activeClass : inactiveClass}`;
+    this.dom.viewTableBtn.className = `px-2.5 py-1 text-xs font-bold rounded-lg transition ${view === 'table' ? activeClass : inactiveClass}`;
+    this.dom.viewPlayerBtn.className = `px-2.5 py-1 text-xs font-bold rounded-lg transition ${view === 'player' ? activeClass : inactiveClass}`;
+    this.dom.viewStyleBtn.className = `px-2.5 py-1 text-xs font-bold rounded-lg transition ${view === 'style' ? activeClass : inactiveClass}`;
 
-    // Containers
     this.dom.viewRawContainer.classList.toggle('hidden', view !== 'raw');
     this.dom.viewTableContainer.classList.toggle('hidden', view !== 'table');
-    this.dom.viewScreenContainer.classList.toggle('hidden', view !== 'screen');
+    this.dom.viewPlayerContainer.classList.toggle('hidden', view !== 'player');
+    this.dom.viewStyleContainer.classList.toggle('hidden', view !== 'style');
 
-    if (view === 'screen') {
-      this.updateScreenPreview();
+    if (view === 'player') {
+      this.updatePlayerVisualStyles();
     }
+  }
+
+  togglePlayerPlay() {
+    const isPlaying = this.player.toggle();
+    if (this.dom.playerPlayBtn) {
+      this.dom.playerPlayBtn.innerHTML = isPlaying 
+        ? '<i class="fa-solid fa-pause"></i>' 
+        : '<i class="fa-solid fa-play"></i>';
+    }
+  }
+
+  stepPlayerCue(delta) {
+    const cues = this.state.cues;
+    if (!cues || cues.length === 0) return;
+    const current = this.player.currentTime;
+    let targetIdx = cues.findIndex(c => c.start > current);
+
+    if (delta < 0) {
+      targetIdx = targetIdx > 1 ? targetIdx - 2 : 0;
+    } else {
+      if (targetIdx === -1) targetIdx = cues.length - 1;
+    }
+
+    if (cues[targetIdx]) {
+      this.player.seek(cues[targetIdx].start);
+    }
+  }
+
+  highlightActiveTableRow(activeCue) {
+    if (!this.dom.tableBody || !activeCue) return;
+    this.dom.tableBody.querySelectorAll('tr').forEach(tr => {
+      const idx = parseInt(tr.dataset.rowIdx, 10);
+      if (this.state.cues[idx] === activeCue) {
+        tr.classList.add('bg-indigo-500/15', 'dark:bg-indigo-500/20');
+      } else {
+        tr.classList.remove('bg-indigo-500/15', 'dark:bg-indigo-500/20');
+      }
+    });
   }
 
   renderTableView() {
     if (!this.dom.tableBody) return;
     const cues = this.state.cues;
     if (cues.length === 0) {
-      this.dom.tableBody.innerHTML = `<tr><td colspan="4" class="p-6 text-center text-slate-400 dark:text-slate-500">尚無字幕資料</td></tr>`;
+      this.dom.tableBody.innerHTML = `<tr><td colspan="4" class="p-8 text-center text-slate-400 dark:text-slate-500 text-xs">尚無字幕資料，請先輸入或載入字幕</td></tr>`;
       return;
     }
 
     this.dom.tableBody.innerHTML = cues.map((c, i) => `
-      <tr class="border-b border-slate-100 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800/50 transition">
-        <td class="p-2.5 text-center font-mono text-xs text-slate-500 dark:text-slate-400">${i + 1}</td>
-        <td class="p-2.5 font-mono text-xs text-indigo-600 dark:text-indigo-400 whitespace-nowrap">${formatSecondsToVtt(c.start)}</td>
-        <td class="p-2.5 font-mono text-xs text-slate-600 dark:text-slate-400 whitespace-nowrap">${formatSecondsToVtt(c.end)}</td>
-        <td class="p-2.5 text-sm text-slate-800 dark:text-slate-200">
-          <input type="text" data-cue-index="${i}" value="${this.escapeHtml(c.text || '')}" class="w-full bg-transparent border-b border-transparent hover:border-slate-300 dark:hover:border-slate-600 focus:border-indigo-500 focus:outline-none px-1 py-0.5 rounded transition">
+      <tr data-row-idx="${i}" class="border-b border-slate-100 dark:border-slate-800/80 hover:bg-slate-50 dark:hover:bg-slate-800/40 transition group">
+        <td class="p-2 text-center font-mono text-xs text-slate-400">${i + 1}</td>
+        <td class="p-2 font-mono text-xs text-indigo-600 dark:text-indigo-400 whitespace-nowrap cursor-pointer hover:underline" data-seek-time="${c.start}">
+          <i class="fa-regular fa-circle-play mr-1 text-[10px]"></i>${formatSecondsToVtt(c.start)}
+        </td>
+        <td class="p-2 font-mono text-xs text-slate-500 dark:text-slate-400 whitespace-nowrap">${formatSecondsToVtt(c.end)}</td>
+        <td class="p-2 text-xs sm:text-sm text-slate-800 dark:text-slate-100">
+          <input type="text" data-cue-index="${i}" value="${this.escapeHtml(c.text || '')}" class="w-full bg-transparent border-b border-transparent group-hover:border-slate-300 dark:group-hover:border-slate-700 focus:border-indigo-500 focus:outline-none px-1.5 py-0.5 rounded transition">
         </td>
       </tr>
     `).join('');
 
-    // Bind inline edit events
+    // Seek on time click
+    this.dom.tableBody.querySelectorAll('[data-seek-time]').forEach(el => {
+      el.addEventListener('click', (e) => {
+        const time = parseFloat(e.currentTarget.dataset.seekTime);
+        this.switchRightView('player');
+        this.player.seek(time);
+        this.player.play();
+      });
+    });
+
+    // Inline edit
     this.dom.tableBody.querySelectorAll('[data-cue-index]').forEach(input => {
       input.addEventListener('change', (e) => {
         const idx = parseInt(e.target.dataset.cueIndex, 10);
         if (this.state.cues[idx]) {
           this.state.cues[idx].text = e.target.value;
-          // Regenerate
           this.rebuildSourceFromCues();
         }
       });
@@ -703,7 +832,6 @@ class SubtitleApp {
   }
 
   rebuildSourceFromCues() {
-    // Regenerate from current cues
     const result = convertSubtitle(this.state.sourceText, {
       sourceFormat: this.state.sourceFormat,
       targetFormat: this.state.targetFormat,
@@ -712,66 +840,148 @@ class SubtitleApp {
       assCustomStyle: this.state.assCustomStyle
     });
     this.dom.targetOutput.value = result.output;
-    this.updateScreenPreview();
   }
 
-  updateScreenPreview() {
-    const cues = this.state.cues;
-    if (!cues || cues.length === 0) {
-      this.dom.previewScreenText.textContent = '尚無字幕內容';
-      this.dom.previewCueCounter.textContent = '0 / 0';
-      this.dom.previewTimeText.textContent = '--:--.---';
-      this.dom.previewTimelineSlider.max = 0;
-      this.dom.previewTimelineSlider.value = 0;
-      return;
+  hexToAssColor(hex, alpha = '00') {
+    if (!hex || !hex.startsWith('#')) return '&H00FFFFFF';
+    const clean = hex.replace('#', '');
+    if (clean.length === 6) {
+      const rr = clean.substring(0, 2);
+      const gg = clean.substring(2, 4);
+      const bb = clean.substring(4, 6);
+      return `&H${alpha}${bb}${gg}${rr}&`.toUpperCase();
     }
+    return '&H00FFFFFF';
+  }
 
-    const idx = Math.min(Math.max(0, this.state.currentPreviewCueIndex), cues.length - 1);
-    this.state.currentPreviewCueIndex = idx;
-    const cue = cues[idx];
+  assToHexColor(ass) {
+    if (!ass || !ass.startsWith('&H')) return '#ffffff';
+    const clean = ass.replace('&H', '').replace('&', '').padStart(8, '0');
+    const rr = clean.substring(6, 8);
+    const gg = clean.substring(4, 6);
+    const bb = clean.substring(2, 4);
+    return `#${rr}${gg}${bb}`.toLowerCase();
+  }
 
-    this.dom.previewScreenText.textContent = cue.text || '';
-    this.dom.previewCueCounter.textContent = `${idx + 1} / ${cues.length}`;
-    this.dom.previewTimeText.textContent = `${formatSecondsToVtt(cue.start)} ➔ ${formatSecondsToVtt(cue.end)}`;
-    this.dom.previewTimelineSlider.max = cues.length - 1;
-    this.dom.previewTimelineSlider.value = idx;
+  applyPresetFromStudio(presetKey) {
+    const preset = ASS_PRESETS[presetKey];
+    if (!preset) return;
 
-    // Apply visual styling to preview text
+    this.state.assPreset = presetKey;
+    this.state.assCustomStyle = { ...preset };
+
+    if (this.dom.styleFontFamily) this.dom.styleFontFamily.value = preset.fontName;
+    if (this.dom.styleFontSize) {
+      this.dom.styleFontSize.value = preset.fontSize;
+      this.dom.styleFontSizeVal.textContent = `${preset.fontSize}px`;
+    }
+    if (this.dom.styleOutlineSize) {
+      this.dom.styleOutlineSize.value = preset.outline;
+      this.dom.styleOutlineSizeVal.textContent = `${preset.outline}px`;
+    }
+    if (this.dom.styleTextColor) this.dom.styleTextColor.value = this.assToHexColor(preset.primaryColor);
+    if (this.dom.styleOutlineColor) this.dom.styleOutlineColor.value = this.assToHexColor(preset.outlineColor);
+    if (this.dom.styleShadowColor) this.dom.styleShadowColor.value = this.assToHexColor(preset.backColor);
+
+    this.processConversion();
+  }
+
+  updateCustomStyleFromStudio() {
+    const fontName = this.dom.styleFontFamily?.value || '微軟正黑體';
+    const fontSize = parseInt(this.dom.styleFontSize?.value, 10) || 52;
+    const outline = parseFloat(this.dom.styleOutlineSize?.value) || 2.5;
+    const primaryColor = this.hexToAssColor(this.dom.styleTextColor?.value || '#ffff00', '00');
+    const outlineColor = this.hexToAssColor(this.dom.styleOutlineColor?.value || '#000000', '00');
+    const backColor = this.hexToAssColor(this.dom.styleShadowColor?.value || '#000000', '80');
+
+    this.state.assCustomStyle = {
+      ...this.state.assCustomStyle,
+      fontName,
+      fontSize,
+      outline,
+      primaryColor,
+      outlineColor,
+      backColor
+    };
+
+    this.processConversion();
+  }
+
+  updateStyleStudioVisual() {
+    if (!this.dom.stylePreviewBox) return;
     const style = this.state.assCustomStyle || ASS_PRESETS.classicYellow;
-    this.applyPreviewStyle(style);
+    const textColor = this.assToHexColor(style.primaryColor || '&H0000FFFF');
+    const outlineColor = this.assToHexColor(style.outlineColor || '&H00000000');
+    const strokeWidth = style.outline || 2.5;
+
+    this.dom.stylePreviewBox.style.fontFamily = style.fontName || 'sans-serif';
+    this.dom.stylePreviewBox.style.color = textColor;
+    this.dom.stylePreviewBox.style.fontSize = `${Math.min(32, Math.max(16, style.fontSize * 0.45))}px`;
+    this.dom.stylePreviewBox.style.textShadow = `
+      -${strokeWidth}px -${strokeWidth}px 0 ${outlineColor},
+       ${strokeWidth}px -${strokeWidth}px 0 ${outlineColor},
+      -${strokeWidth}px  ${strokeWidth}px 0 ${outlineColor},
+       ${strokeWidth}px  ${strokeWidth}px 0 ${outlineColor},
+       0px 3px 6px rgba(0,0,0,0.8)
+    `;
+
+    this.updatePlayerVisualStyles();
   }
 
-  applyPreviewStyle(style) {
-    if (!this.dom.previewScreenText) return;
-    const el = this.dom.previewScreenText;
-    
-    // Parse ASS colors (AABBGGRR) or hex
-    let textColor = '#FFFF00';
-    if (style.primaryColor && style.primaryColor.startsWith('&H')) {
-      const hex = style.primaryColor.replace('&H', '').replace('&', '').padStart(8, '0');
-      const rr = hex.substring(6, 8);
-      const gg = hex.substring(4, 6);
-      const bb = hex.substring(2, 4);
-      textColor = `#${rr}${gg}${bb}`;
-    }
+  updatePlayerVisualStyles() {
+    if (!this.dom.playerSubtitleText) return;
+    const style = this.state.assCustomStyle || ASS_PRESETS.classicYellow;
+    const textColor = this.assToHexColor(style.primaryColor || '&H0000FFFF');
+    const outlineColor = this.assToHexColor(style.outlineColor || '&H00000000');
+    const strokeWidth = style.outline || 2.5;
 
-    el.style.color = textColor;
-    el.style.fontFamily = style.fontName || 'sans-serif';
-    el.style.fontSize = `${Math.min(28, Math.max(16, (style.fontSize || 52) * 0.45))}px`;
-    el.style.textShadow = `
-      -2px -2px 0 #000,
-       2px -2px 0 #000,
-      -2px  2px 0 #000,
-       2px  2px 0 #000,
-       0px  3px 6px rgba(0,0,0,0.8)
+    this.dom.playerSubtitleText.style.fontFamily = style.fontName || 'sans-serif';
+    this.dom.playerSubtitleText.style.color = textColor;
+    this.dom.playerSubtitleText.style.fontSize = `${Math.min(32, Math.max(18, style.fontSize * 0.45))}px`;
+    this.dom.playerSubtitleText.style.textShadow = `
+      -${strokeWidth}px -${strokeWidth}px 0 ${outlineColor},
+       ${strokeWidth}px -${strokeWidth}px 0 ${outlineColor},
+      -${strokeWidth}px  ${strokeWidth}px 0 ${outlineColor},
+       ${strokeWidth}px  ${strokeWidth}px 0 ${outlineColor},
+       0px 3px 6px rgba(0,0,0,0.9)
     `;
   }
 
-  stepPreviewCue(delta) {
-    const newIdx = this.state.currentPreviewCueIndex + delta;
-    if (newIdx >= 0 && newIdx < this.state.cues.length) {
-      this.state.currentPreviewCueIndex = newIdx;
-      this.updateScreenPreview();
+  // Find & Replace Modal
+  openFindModal() {
+    this.dom.findModal.classList.remove('hidden');
+    this.dom.findModal.classList.add('flex');
+    this.dom.findInput.focus();
+  }
+
+  closeFindModal() {
+    this.dom.findModal.classList.add('hidden');
+    this.dom.findModal.classList.remove('flex');
+  }
+
+  executeFindReplace() {
+    const findStr = this.dom.findInput.value;
+    const replaceStr = this.dom.replaceInput.value;
+    if (!findStr) {
+      toast.show('請輸入搜尋關鍵字', 'warning');
+      return;
+    }
+
+    let count = 0;
+    this.state.cues.forEach(c => {
+      if (c.text && c.text.includes(findStr)) {
+        c.text = c.text.replaceAll(findStr, replaceStr);
+        count++;
+      }
+    });
+
+    if (count > 0) {
+      this.rebuildSourceFromCues();
+      this.renderTableView();
+      this.closeFindModal();
+      toast.show(`已成功替換 ${count} 處關鍵字！✨`, 'success');
+    } else {
+      toast.show('未找到相符的文字', 'info');
     }
   }
 
@@ -782,55 +992,26 @@ class SubtitleApp {
 
     if (this.dom.tabInputBtn) this.dom.tabInputBtn.className = `flex-1 py-2 text-xs font-bold rounded-lg transition flex items-center justify-center gap-1.5 active:scale-98 ${tab === 'input' ? activeClass : inactiveClass}`;
     if (this.dom.tabOutputBtn) this.dom.tabOutputBtn.className = `flex-1 py-2 text-xs font-bold rounded-lg transition flex items-center justify-center gap-1.5 active:scale-98 ${tab === 'output' ? activeClass : inactiveClass}`;
+    if (this.dom.tabPlayerBtn) this.dom.tabPlayerBtn.className = `flex-1 py-2 text-xs font-bold rounded-lg transition flex items-center justify-center gap-1.5 active:scale-98 ${tab === 'player' ? activeClass : inactiveClass}`;
 
     if (tab === 'input') {
       this.dom.mobileInputPane.classList.remove('hidden');
       this.dom.mobileInputPane.classList.add('flex');
       this.dom.mobileOutputPane.classList.add('hidden');
       this.dom.mobileOutputPane.classList.remove('flex');
-    } else {
+    } else if (tab === 'output') {
       this.dom.mobileInputPane.classList.add('hidden');
       this.dom.mobileInputPane.classList.remove('flex');
       this.dom.mobileOutputPane.classList.remove('hidden');
       this.dom.mobileOutputPane.classList.add('flex');
+      this.switchRightView('raw');
+    } else if (tab === 'player') {
+      this.dom.mobileInputPane.classList.add('hidden');
+      this.dom.mobileInputPane.classList.remove('flex');
+      this.dom.mobileOutputPane.classList.remove('hidden');
+      this.dom.mobileOutputPane.classList.add('flex');
+      this.switchRightView('player');
     }
-  }
-
-  openAssModal() {
-    this.dom.assModal.classList.remove('hidden');
-    this.dom.assModal.classList.add('flex');
-    // Fill current style into modal inputs
-    const style = this.state.assCustomStyle || ASS_PRESETS.classicYellow;
-    this.dom.assFontName.value = style.fontName || '微軟正黑體';
-    this.dom.assFontSize.value = style.fontSize || 52;
-  }
-
-  closeAssModal() {
-    this.dom.assModal.classList.add('hidden');
-    this.dom.assModal.classList.remove('flex');
-  }
-
-  applyAssPresetToModal(presetKey) {
-    const preset = ASS_PRESETS[presetKey];
-    if (preset) {
-      this.dom.assFontName.value = preset.fontName;
-      this.dom.assFontSize.value = preset.fontSize;
-    }
-  }
-
-  saveAssModal() {
-    const presetKey = this.dom.assPresetSelect.value;
-    const base = ASS_PRESETS[presetKey] || ASS_PRESETS.classicYellow;
-    this.state.assPreset = presetKey;
-    this.state.assCustomStyle = {
-      ...base,
-      fontName: this.dom.assFontName.value || base.fontName,
-      fontSize: parseInt(this.dom.assFontSize.value, 10) || base.fontSize
-    };
-
-    this.closeAssModal();
-    this.processConversion();
-    toast.show('已套用 ASS 樣式自訂設定！🎨', 'success');
   }
 
   escapeHtml(str) {
@@ -840,5 +1021,5 @@ class SubtitleApp {
 
 // Instantiate on DOM load
 window.addEventListener('DOMContentLoaded', () => {
-  window.subtitleApp = new SubtitleApp();
+  window.subtitleStudio = new SubtitleStudioApp();
 });
