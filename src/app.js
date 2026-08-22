@@ -526,7 +526,7 @@ class SubtitleStudioApp {
         this.updateTimeOffsetDisplay();
         this.processConversion();
 
-        celebration.trigger('🎉 檔案載入成功！', `已成功載入 <strong>${file.name}</strong> (${encoding.toUpperCase()})，並自動轉為 <strong>${this.state.targetFormat.toUpperCase()}</strong>！🌟`);
+        toast.show(`已成功載入 ${file.name}`, 'info', 1800);
       } catch (err) {
         console.error('File load error:', err);
         toast.show(`載入檔案失敗: ${err.message}`, 'error');
@@ -589,7 +589,7 @@ class SubtitleStudioApp {
     }
 
     this.renderBatchList();
-    celebration.trigger('📦 批次轉換完成！', `已為您成功轉換 <strong>${files.length}</strong> 個字幕檔案！可個別下載或一鍵打包 ZIP 匯出！✨`);
+    toast.show(`批次轉換完成 (${files.length} 個檔案)`, 'success', 2000);
   }
 
   renderBatchList() {

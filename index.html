@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <title>Subtitle Master 字幕萬用轉換大師 | 萬用字幕格式轉換器</title>
-  <meta name="description" content="極致 UI/UX 萬用字幕格式轉換器。支援 SRT、WebVTT、ASS、SSA、LRC、JSON、CSV、TXT 任意互轉，內建實時影音播放器預覽與 ASS 樣式工房，100% 瀏覽器本機執行。">
+  <meta name="description" content="極致 UI/UX 萬用字幕格式轉換器。支援 SRT、WebVTT、ASS、SSA、LRC、JSON、CSV、TXT 任意互轉，內建即時影音播放器預覽與 ASS 樣式工房，100% 瀏覽器本機執行。">
   <link rel="icon" href="favicon.ico" type="image/x-icon">
   
   <!-- Tailwind CSS CDN -->
@@ -75,7 +75,7 @@
             </span>
           </div>
           <p class="hidden xl:block text-[11px] text-slate-500 dark:text-slate-400 leading-tight">
-            萬用字幕格式任意互轉 · 實時播放器預覽 · 100% 本機執行
+            萬用字幕格式任意互轉 · 即時播放器預覽 · 100% 本機執行
           </p>
         </div>
       </div>
@@ -272,7 +272,7 @@
           <button id="viewTableBtn" title="條列式語句編輯" class="px-2 sm:px-2.5 py-1 text-[11px] sm:text-xs font-bold rounded-md text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700/60 transition">
             表格
           </button>
-          <button id="viewPlayerBtn" title="實時影片播放器預覽" class="px-2 sm:px-2.5 py-1 text-[11px] sm:text-xs font-bold rounded-md text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700/60 transition flex items-center gap-1">
+          <button id="viewPlayerBtn" title="即時影片播放器預覽" class="px-2 sm:px-2.5 py-1 text-[11px] sm:text-xs font-bold rounded-md text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700/60 transition flex items-center gap-1">
             <i class="fa-solid fa-play text-[9px] text-emerald-500"></i>
             <span>播放器</span>
           </button>
@@ -426,7 +426,7 @@
             </div>
 
             <div class="p-2.5 bg-indigo-50 dark:bg-indigo-950/60 rounded-xl border border-indigo-200 dark:border-indigo-900 text-[11px] text-indigo-700 dark:text-indigo-300">
-              💡 調整樣式將即時反映於實時播放器與匯出的 ASS 檔案中！
+              💡 調整樣式將即時反映於即時播放器與匯出的 ASS 檔案中！
             </div>
           </div>
 
@@ -579,8 +579,8 @@
     </div>
   </div>
 
-  <!-- Toast Notification Container -->
-  <div id="toastContainer"></div>
+  <!-- Toast Notification Container (Fixed Bottom Right) -->
+  <div id="toastContainer" class="fixed bottom-4 right-4 z-[999] flex flex-col-reverse gap-2 pointer-events-none max-w-[320px] sm:max-w-[360px] w-full px-3"></div>
 
   <!-- App Script Entry -->
   <script type="module" src="src/app.js"></script>
