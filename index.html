@@ -562,6 +562,35 @@
     </div>
   </div>
 
+  <!-- ==================== DIAGNOSTIC DETAILS MODAL ==================== -->
+  <div id="diagnosticModal" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm hidden items-center justify-center z-50 p-4">
+    <div class="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl shadow-2xl max-w-lg w-full p-5 animate-pop-in">
+      
+      <div class="flex items-center justify-between mb-3.5 border-b border-slate-100 dark:border-slate-700 pb-2.5">
+        <div class="flex items-center gap-2">
+          <i class="fa-solid fa-stethoscope text-indigo-500"></i>
+          <h3 class="text-sm font-bold text-slate-800 dark:text-slate-100">字幕品質健檢與語法診斷</h3>
+        </div>
+        <button id="btnCloseDiagnosticModal" class="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 p-1 rounded-lg">
+          <i class="fa-solid fa-xmark text-sm"></i>
+        </button>
+      </div>
+
+      <div id="diagnosticModalList" class="max-h-72 overflow-y-auto space-y-2 text-xs pr-1"></div>
+
+      <div class="mt-4 pt-3 border-t border-slate-100 dark:border-slate-700/80 flex items-center justify-between">
+        <span class="text-[11px] text-slate-400">💡 支援自動修正箭頭語法、時間重疊與負時長</span>
+        <div class="flex gap-2">
+          <button id="btnModalAutoFix" class="px-4 py-2 bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-700 hover:to-purple-700 text-white font-bold rounded-xl shadow transition text-xs active:scale-95 flex items-center gap-1.5">
+            <i class="fa-solid fa-wand-magic-sparkles"></i>
+            <span>一鍵自動修復</span>
+          </button>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
   <!-- ==================== CELEBRATION CONFETTI & OVERLAY ==================== -->
   <div id="successOverlay" class="fixed inset-0 bg-black/60 backdrop-blur-sm hidden items-center justify-center z-[100] p-4">
     <canvas id="confettiCanvas" class="absolute inset-0 pointer-events-none w-full h-full"></canvas>

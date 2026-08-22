@@ -9,7 +9,7 @@ import { toast } from './ui/toast.js';
 import { celebration } from './ui/confetti.js';
 import { formatSecondsToVtt, formatDuration } from './utils/time.js';
 import { SubtitlePlayer } from './ui/player.js';
-import { inspectCues, autoFixCues } from './ui/diagnostics.js';
+import { inspectSubtitle, autoFixSubtitle } from './ui/diagnostics.js';
 import { CommandPalette } from './ui/commandPalette.js';
 
 class SubtitleStudioApp {
@@ -151,6 +151,12 @@ class SubtitleStudioApp {
       replaceInput: document.getElementById('replaceInput'),
       btnExecuteReplace: document.getElementById('btnExecuteReplace'),
       btnCloseFindModal: document.getElementById('btnCloseFindModal'),
+
+      // Diagnostic Modal
+      diagnosticModal: document.getElementById('diagnosticModal'),
+      diagnosticModalList: document.getElementById('diagnosticModalList'),
+      btnCloseDiagnosticModal: document.getElementById('btnCloseDiagnosticModal'),
+      btnModalAutoFix: document.getElementById('btnModalAutoFix'),
       
       // Batch Mode Elements
       batchContainer: document.getElementById('batchContainer'),
@@ -332,7 +338,10 @@ class SubtitleStudioApp {
     this.dom.btnCloseFindModal?.addEventListener('click', () => this.closeFindModal());
     this.dom.btnExecuteReplace?.addEventListener('click', () => this.executeFindReplace());
 
-    // 12. Auto-Fix diagnostics button
+    // 12. Diagnostics Details Modal & Auto-Fix
+    this.dom.diagnosticBadge?.addEventListener('click', () => this.openDiagnosticModal());
+    this.dom.btnCloseDiagnosticModal?.addEventListener('click', () => this.closeDiagnosticModal());
+    this.dom.btnModalAutoFix?.addEventListener('click', () => this.autoFixIssues());
     this.dom.btnAutoFix?.addEventListener('click', () => this.autoFixIssues());
 
     // 13. Mobile Navigation
@@ -412,8 +421,8 @@ class SubtitleStudioApp {
     this.state.cues = result.cues;
     this.state.stats = result.stats;
 
-    // Run health diagnostics
-    this.state.diagnostics = inspectCues(result.cues);
+    // Run smart health diagnostics
+    this.state.diagnostics = inspectSubtitle(sourceText, result.cues, sourceFormat);
 
     // Update Output
     this.dom.targetOutput.value = result.output;
@@ -454,22 +463,80 @@ class SubtitleStudioApp {
     if (!this.dom.diagnosticBadge) return;
     const { issues, health } = this.state.diagnostics;
 
-    if (health === 'empty' || issues.length === 0) {
-      this.dom.diagnosticBadge.innerHTML = `<i class="fa-solid fa-circle-check text-emerald-500 mr-1"></i>品質優良`;
-      this.dom.diagnosticBadge.className = 'text-[11px] font-medium text-emerald-600 dark:text-emerald-400 flex items-center';
+    if (health === 'none') {
+      this.dom.diagnosticBadge.innerHTML = `<i class="fa-solid fa-circle-minus text-slate-400 mr-1"></i>未輸入字幕`;
+      this.dom.diagnosticBadge.className = 'text-[11px] font-medium text-slate-400 dark:text-slate-500 flex items-center';
       if (this.dom.btnAutoFix) this.dom.btnAutoFix.classList.add('hidden');
+    } else if (health === 'perfect') {
+      this.dom.diagnosticBadge.innerHTML = `<i class="fa-solid fa-circle-check text-emerald-500 mr-1"></i>品質優良`;
+      this.dom.diagnosticBadge.className = 'text-[11px] font-semibold text-emerald-600 dark:text-emerald-400 flex items-center cursor-pointer hover:underline';
+      if (this.dom.btnAutoFix) this.dom.btnAutoFix.classList.add('hidden');
+    } else if (health === 'error' || health === 'danger') {
+      const label = health === 'error' ? '格式異常 (無法解析)' : `發現 ${issues.length} 項異常`;
+      this.dom.diagnosticBadge.innerHTML = `<i class="fa-solid fa-circle-xmark text-rose-500 mr-1"></i>${label}`;
+      this.dom.diagnosticBadge.className = 'text-[11px] font-bold text-rose-600 dark:text-rose-400 flex items-center cursor-pointer hover:underline';
+      const hasFixable = issues.some(iss => iss.fixable !== false);
+      if (this.dom.btnAutoFix) this.dom.btnAutoFix.classList.toggle('hidden', !hasFixable);
     } else {
       this.dom.diagnosticBadge.innerHTML = `<i class="fa-solid fa-triangle-exclamation text-amber-500 mr-1"></i>發現 ${issues.length} 項問題`;
       this.dom.diagnosticBadge.className = 'text-[11px] font-medium text-amber-600 dark:text-amber-400 flex items-center cursor-pointer hover:underline';
-      if (this.dom.btnAutoFix) this.dom.btnAutoFix.classList.remove('hidden');
+      const hasFixable = issues.some(iss => iss.fixable !== false);
+      if (this.dom.btnAutoFix) this.dom.btnAutoFix.classList.toggle('hidden', !hasFixable);
     }
   }
 
+  openDiagnosticModal() {
+    const { issues, health } = this.state.diagnostics;
+    if (health === 'none') {
+      toast.show('尚未輸入字幕內容', 'info');
+      return;
+    }
+    if (health === 'perfect' && issues.length === 0) {
+      toast.show('目前字幕時間軸與格式品質優良，無任何異常！✨', 'success', 2000);
+      return;
+    }
+
+    if (!this.dom.diagnosticModal || !this.dom.diagnosticModalList) return;
+
+    this.dom.diagnosticModalList.innerHTML = issues.map((iss, i) => {
+      const isCritical = iss.type === 'syntax_error' || iss.type === 'syntax_arrow' || iss.type === 'zero_duration';
+      const bgClass = isCritical 
+        ? 'bg-rose-50 dark:bg-rose-950/40 border-rose-200 dark:border-rose-800/80 text-rose-700 dark:text-rose-300' 
+        : 'bg-amber-50 dark:bg-amber-950/40 border-amber-200 dark:border-amber-800/80 text-amber-700 dark:text-amber-300';
+      const icon = isCritical ? 'fa-solid fa-circle-xmark text-rose-500' : 'fa-solid fa-triangle-exclamation text-amber-500';
+
+      return `
+        <div class="p-3 rounded-xl border flex items-start space-x-2.5 ${bgClass}">
+          <i class="${icon} text-sm mt-0.5 flex-shrink-0"></i>
+          <div class="flex-1 min-w-0 leading-relaxed font-medium">
+            ${iss.message}
+          </div>
+          ${iss.fixable ? '<span class="text-[10px] px-1.5 py-0.5 rounded bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 font-bold flex-shrink-0 border border-slate-200 dark:border-slate-700 shadow-sm">可自動修復</span>' : ''}
+        </div>
+      `;
+    }).join('');
+
+    this.dom.diagnosticModal.classList.remove('hidden');
+    this.dom.diagnosticModal.classList.add('flex');
+  }
+
+  closeDiagnosticModal() {
+    if (!this.dom.diagnosticModal) return;
+    this.dom.diagnosticModal.classList.add('hidden');
+    this.dom.diagnosticModal.classList.remove('flex');
+  }
+
   autoFixIssues() {
-    const fixed = autoFixCues(this.state.cues);
-    this.state.cues = fixed;
-    this.rebuildSourceFromCues();
-    toast.show('已自動修復時間軸重疊與時長問題！✨', 'success');
+    const { fixedText, fixedCount } = autoFixSubtitle(this.state.sourceText, this.state.cues);
+    if (fixedCount > 0) {
+      this.state.sourceText = fixedText;
+      this.dom.sourceInput.value = fixedText;
+      this.processConversion();
+      this.closeDiagnosticModal();
+      toast.show(`已成功自動修復 ${fixedCount} 處語法與時間軸問題！✨`, 'success', 2500);
+    } else {
+      toast.show('目前未檢測到可自動修正的規則問題', 'info');
+    }
   }
 
   adjustTimeOffset(delta) {
