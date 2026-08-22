@@ -64,8 +64,9 @@ const resAss = convertSubtitle(sampleVtt, { sourceFormat: 'vtt', targetFormat: '
 assert(resAss.cues.length === 2, 'Parsed 2 cues from VTT');
 assert(resAss.output.includes('[Script Info]'), 'ASS includes [Script Info]');
 assert(resAss.output.includes('[V4+ Styles]'), 'ASS includes [V4+ Styles]');
-assert(resAss.output.includes('Style: LINE,LINE Seed TW_OTF Bold,48,&H0080FFFF,&H000000FF,&H00000000,&H00000000,-1,0,0,0,100,100,1,0,1,2,0,2,1,1,40,1'), 'ASS includes LINE style');
 assert(resAss.output.includes('Style: Secondary,Helvetica,12,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,-1,0,0,0,100,100,0,0,1,2,0,2,1,1,40,1'), 'ASS includes Secondary style');
+assert(resAss.output.includes('Style: LINE,LINE Seed TW_OTF Bold,48,&H0080FFFF,&H000000FF,&H00000000,&H00000000,-1,0,0,0,100,100,1,0,1,2,0,2,1,1,40,1'), 'ASS includes LINE style');
+assert(resAss.output.indexOf('Style: Default') < resAss.output.indexOf('Style: Secondary') && resAss.output.indexOf('Style: Secondary') < resAss.output.indexOf('Style: LINE'), 'Styles ordered: Default -> Secondary -> LINE');
 assert(resAss.output.includes('[Events]'), 'ASS includes [Events]');
 assert(resAss.output.includes('Dialogue: 0,0:00:01.00,0:00:04.00,Default,,0,0,0,,這是第一行字幕\\N這是第二行字幕'), 'Dialogue line correctly formatted with \\N');
 
