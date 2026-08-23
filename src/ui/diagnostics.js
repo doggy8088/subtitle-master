@@ -5,6 +5,8 @@
  */
 
 import { formatSecondsToVtt } from '../utils/time.js';
+import { generateSubtitle } from '../generators/index.js';
+import { parseSubtitle, detectFormat } from '../parsers/index.js';
 
 /**
  * @typedef {Object} DiagnosticIssue
@@ -155,26 +157,54 @@ export function inspectSubtitle(rawText, cues = [], format = 'auto') {
 
 /**
  * Automatically repairs common syntax & timing issues.
+ * Deletes empty subtitle segments, fixes inverted/zero durations, fixes overlapping timestamps,
+ * fixes malformed arrow syntax, and regenerates valid subtitle text.
  * @param {string} rawText
- * @param {Array} cues 
+ * @param {Array} [cues=[]]
+ * @param {string} [format='auto']
  * @returns {{ fixedText: string, fixedCues: Array, fixedCount: number }}
  */
-export function autoFixSubtitle(rawText, cues = []) {
+export function autoFixSubtitle(rawText, cues = [], format = 'auto') {
   let fixedText = rawText || '';
   let fixedCount = 0;
 
   // 1. Fix single arrows "->" to "-->" in raw text
   if (/\d\s*->\s*\d/.test(fixedText)) {
-    fixedText = fixedText.replace(/(\d{1,2}:\d{2}:\d{2}[,\.]\d{1,3})\s*->\s*(\d{1,2}:\d{2}:\d{2}[,\.]\d{1,3})/g, '$1 --> $2');
-    fixedCount++;
+    const arrowFixed = fixedText.replace(/(\d{1,2}:\d{2}:\d{2}[,\.]\d{1,3})\s*->\s*(\d{1,2}:\d{2}:\d{2}[,\.]\d{1,3})/g, '$1 --> $2');
+    if (arrowFixed !== fixedText) {
+      fixedText = arrowFixed;
+      fixedCount++;
+    }
   }
 
-  // 2. Fix cues timing & text
-  const fixedCues = cues.map(c => ({ ...c }));
+  // 2. Obtain working cues
+  let workingCues = Array.isArray(cues) && cues.length > 0 ? cues.map(c => ({ ...c })) : [];
 
-  for (let i = 0; i < fixedCues.length; i++) {
-    const curr = fixedCues[i];
-    const prev = i > 0 ? fixedCues[i - 1] : null;
+  // If cues was empty or arrow was fixed, try parsing from fixedText
+  if (workingCues.length === 0 && fixedText.trim()) {
+    const parsed = parseSubtitle(fixedText, format);
+    if (parsed.cues && parsed.cues.length > 0) {
+      workingCues = parsed.cues.map(c => ({ ...c }));
+    }
+  }
+
+  const fixedCues = [];
+
+  // 3. Process cues: drop empty cues, fix inverted/zero duration, fix overlap, trim whitespace
+  for (let i = 0; i < workingCues.length; i++) {
+    const curr = workingCues[i];
+    const textTrimmed = (curr.text || '').trim();
+
+    // Remove empty cue segments
+    if (!textTrimmed) {
+      fixedCount++;
+      continue;
+    }
+
+    if (textTrimmed !== curr.text) {
+      curr.text = textTrimmed;
+      fixedCount++;
+    }
 
     // Fix inverted/zero duration
     if (curr.end <= curr.start) {
@@ -182,19 +212,27 @@ export function autoFixSubtitle(rawText, cues = []) {
       fixedCount++;
     }
 
-    // Fix overlap
-    if (prev && curr.start < prev.end) {
-      prev.end = Math.max(prev.start + 0.5, curr.start);
-      fixedCount++;
-    }
-
-    // Trim whitespace
-    if (curr.text) {
-      const trimmed = curr.text.trim();
-      if (trimmed !== curr.text) {
-        curr.text = trimmed;
+    // Fix overlap with previous valid cue
+    if (fixedCues.length > 0) {
+      const prev = fixedCues[fixedCues.length - 1];
+      if (curr.start < prev.end) {
+        prev.end = Math.max(prev.start + 0.5, curr.start);
         fixedCount++;
       }
+    }
+
+    fixedCues.push(curr);
+  }
+
+  // 4. If any cues were processed or format is known, regenerate the clean subtitle text
+  if (workingCues.length > 0 || fixedCount > 0) {
+    let targetFmt = format;
+    if (!targetFmt || targetFmt === 'auto') {
+      targetFmt = detectFormat(fixedText) || 'srt';
+    }
+    const regenerated = generateSubtitle(fixedCues, targetFmt);
+    if (regenerated !== undefined) {
+      fixedText = regenerated;
     }
   }
 

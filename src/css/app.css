@@ -125,3 +125,38 @@ input[type="range"]::-webkit-slider-runnable-track {
 .dark input[type="range"]::-webkit-slider-runnable-track {
   background: rgba(51, 65, 85, 0.6);
 }
+
+/* ==================== TABLE ROW MERGE BUTTON HOVER ==================== */
+.table-merge-btn {
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(0) scale(0.9);
+  transition: opacity 0.15s cubic-bezier(0.16, 1, 0.3, 1), transform 0.15s cubic-bezier(0.16, 1, 0.3, 1), background-color 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+}
+
+/* Hovering current row or hovering the row immediately below reveals the merge button between them */
+tr:hover .table-merge-btn,
+tr:has(+ tr:hover) .table-merge-btn,
+.table-merge-btn:hover {
+  opacity: 1 !important;
+  pointer-events: auto !important;
+  transform: translateY(0) scale(1);
+}
+
+.table-merge-btn:hover {
+  transform: scale(1.18) !important;
+}
+
+/* ==================== WORKSPACE PANE SPLITTER ==================== */
+#paneSplitter {
+  touch-action: none;
+}
+#paneSplitter.is-dragging > div {
+  background-color: #6366f1 !important;
+  box-shadow: 0 0 12px rgba(99, 102, 241, 0.5);
+}
+#paneSplitter.is-dragging .rounded-full {
+  border-color: #6366f1 !important;
+  box-shadow: 0 0 10px rgba(99, 102, 241, 0.4);
+}
+

@@ -5,6 +5,7 @@
 import { convertSubtitle, parseSubtitle, generateSubtitle } from '../src/converter.js';
 import { parseTimestampToSeconds, formatSecondsToSrt, formatSecondsToVtt, formatSecondsToAss } from '../src/utils/time.js';
 import { decodeBuffer } from '../src/utils/encoding.js';
+import { inspectSubtitle, autoFixSubtitle } from '../src/ui/diagnostics.js';
 
 let passed = 0;
 let failed = 0;
@@ -175,6 +176,65 @@ assert(restoredConverted.output.includes('WEBVTT') && restoredConverted.output.i
 // Step 4: User clears content -> localStorage holds empty string
 mockSave('');
 assert(mockLoad() === '', 'Cleared content saved as empty string');
+
+// 10. Test Auto-Fix Subtitle (Empty Subtitle Cues Deletion, Timing & Arrow Repair)
+console.log('\n10. Testing Auto-Fix Subtitle Engine:');
+const sampleWithEmptyCue = `WEBVTT
+
+00:00:00.040 --> 00:00:05.400
+啊，就開始錄了
+
+00:00:07.120 --> 00:00:07.240
+
+
+00:00:10.370 --> 00:00:13.690
+靠近一點。OK，那就這樣
+`;
+
+const parsedWithEmpty = parseSubtitle(sampleWithEmptyCue, 'vtt');
+assert(parsedWithEmpty.cues.length === 3, 'Initially parsed 3 cues including empty segment');
+
+const fixResult = autoFixSubtitle(sampleWithEmptyCue, parsedWithEmpty.cues, 'vtt');
+assert(fixResult.fixedCues.length === 2, 'Auto-fix removed the empty subtitle segment (2 valid cues left)');
+assert(!fixResult.fixedText.includes('00:00:07.120'), 'Fixed text no longer contains the empty cue timestamp');
+assert(fixResult.fixedCount >= 1, 'Fixed count accurately reflects removed empty cues');
+
+// Test arrow repair with auto-fix
+const sampleWithArrowError = `1
+00:00:01,000 -> 00:00:04,000
+語法箭頭錯誤字幕段落
+`;
+const arrowFixResult = autoFixSubtitle(sampleWithArrowError, [], 'srt');
+assert(arrowFixResult.fixedText.includes('-->'), 'Auto-fix repaired "->" to "-->" in SRT');
+assert(arrowFixResult.fixedCues.length === 1, 'Auto-fix parsed cues after repairing arrow');
+
+// 11. Test Cue Merge & Delete Logic
+console.log('\n11. Testing Cue Merge & Delete Operations Logic:');
+const testCues = [
+  { id: 1, start: 1.0, end: 3.0, text: '第一句' },
+  { id: 2, start: 3.5, end: 6.0, text: '第二句' },
+  { id: 3, start: 7.0, end: 9.0, text: '第三句' }
+];
+
+// Delete cue 1 (second cue: '第二句')
+const deletedList = [...testCues.map(c => ({ ...c }))];
+deletedList.splice(1, 1);
+assert(deletedList.length === 2, 'Deleted cue at index 1 (length became 2)');
+assert(deletedList[0].text === '第一句' && deletedList[1].text === '第三句', 'Remaining cues match expected');
+
+// Merge cue 0 ('第一句') and cue 1 ('第二句')
+const mergeList = [...testCues.map(c => ({ ...c }))];
+const c0 = mergeList[0];
+const c1 = mergeList[1];
+c0.end = Math.max(c0.end, c1.end);
+c0.text = `${c0.text.trim()}\n${c1.text.trim()}`;
+mergeList.splice(1, 1);
+
+assert(mergeList.length === 2, 'Merged adjacent cues (length became 2)');
+assert(mergeList[0].start === 1.0 && mergeList[0].end === 6.0, 'Merged cue spans from 1.0s to 6.0s');
+assert(mergeList[0].text === '第一句\n第二句', 'Merged text combined with newline');
+const regeneratedMergedSrt = generateSubtitle(mergeList, 'srt');
+assert(regeneratedMergedSrt.includes('第一句\n第二句'), 'Regenerated SRT output contains merged multiline subtitle');
 
 console.log(`\n========================================`);
 console.log(`Test Results: ${passed} passed, ${failed} failed.`);

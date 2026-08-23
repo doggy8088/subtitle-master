@@ -44,6 +44,7 @@ class SubtitleStudioApp {
     this.initTheme();
     this.bindDomElements();
     this.initPlayer();
+    this.initSplitter();
     this.bindEvents();
     this.commandPalette = new CommandPalette(this);
     this.initContentAndFormats();
@@ -191,6 +192,8 @@ class SubtitleStudioApp {
       fileInput: document.getElementById('fileInput'),
       dropZone: document.getElementById('dropZone'),
       globalDropOverlay: document.getElementById('globalDropOverlay'),
+      workspaceContainer: document.getElementById('workspaceContainer'),
+      paneSplitter: document.getElementById('paneSplitter'),
       
       // Selectors & Badges
       sourceFormatSelect: document.getElementById('sourceFormatSelect'),
@@ -486,6 +489,21 @@ class SubtitleStudioApp {
 
     // 17. Browser History Navigation (Back / Forward)
     window.addEventListener('popstate', () => this.handlePopState());
+
+    // 18. Window Resize for Responsive Layout & Split Pane
+    window.addEventListener('resize', () => {
+      if (window.innerWidth >= 768) {
+        this.dom.mobileInputPane.classList.remove('hidden');
+        this.dom.mobileInputPane.classList.add('flex');
+        this.dom.mobileOutputPane.classList.remove('hidden');
+        this.dom.mobileOutputPane.classList.add('flex');
+        const savedSplit = localStorage.getItem('sm_pane_split_pct');
+        const pct = savedSplit ? parseFloat(savedSplit) : 50;
+        this.applySplitPercentage(pct || 50);
+      } else {
+        this.switchMobileTab(this.state.activeMobileTab);
+      }
+    });
   }
 
   setQuickFormat(src, tgt) {
@@ -726,14 +744,15 @@ class SubtitleStudioApp {
   }
 
   autoFixIssues() {
-    const { fixedText, fixedCount } = autoFixSubtitle(this.state.sourceText, this.state.cues);
+    const srcFmt = this.state.sourceFormat === 'auto' ? (this.state.stats?.detectedSourceFormat || 'srt') : this.state.sourceFormat;
+    const { fixedText, fixedCount } = autoFixSubtitle(this.state.sourceText, this.state.cues, srcFmt);
     if (fixedCount > 0) {
       this.state.sourceText = fixedText;
       this.dom.sourceInput.value = fixedText;
       this.saveSourceText(fixedText);
       this.processConversion();
       this.closeDiagnosticModal();
-      toast.show(`已成功自動修復 ${fixedCount} 處語法與時間軸問題！✨`, 'success', 2500);
+      toast.show(`已成功自動修復 ${fixedCount} 處語法、空白段落與時間軸問題！✨`, 'success', 2500);
     } else {
       toast.show('目前未檢測到可自動修正的規則問題', 'info');
     }
@@ -1062,19 +1081,51 @@ class SubtitleStudioApp {
     if (!this.dom.tableBody) return;
     const cues = this.state.cues;
     if (cues.length === 0) {
-      this.dom.tableBody.innerHTML = `<tr><td colspan="4" class="p-8 text-center text-slate-400 dark:text-slate-500 text-xs">尚無字幕資料，請先輸入或載入字幕</td></tr>`;
+      this.dom.tableBody.innerHTML = `<tr><td colspan="5" class="p-8 text-center text-slate-400 dark:text-slate-500 text-xs">尚無字幕資料，請先輸入或載入字幕</td></tr>`;
       return;
     }
 
     this.dom.tableBody.innerHTML = cues.map((c, i) => `
-      <tr data-row-idx="${i}" class="border-b border-slate-100 dark:border-slate-800/80 hover:bg-slate-50 dark:hover:bg-slate-800/40 transition group">
+      <tr data-row-idx="${i}" class="border-b border-slate-100 dark:border-slate-800/80 hover:bg-slate-50 dark:hover:bg-slate-800/40 transition group relative">
         <td class="p-2 text-center font-mono text-xs text-slate-400">${i + 1}</td>
-        <td class="p-2 font-mono text-xs text-indigo-600 dark:text-indigo-400 whitespace-nowrap cursor-pointer hover:underline" data-seek-time="${c.start}">
-          <i class="fa-regular fa-circle-play mr-1 text-[10px]"></i>${formatSecondsToVtt(c.start)}
+        
+        <!-- Start Time with Play Preview & Hover Merge Button -->
+        <td class="relative p-2 font-mono text-xs text-indigo-600 dark:text-indigo-400 whitespace-nowrap">
+          <div class="inline-flex items-center cursor-pointer hover:underline" data-seek-time="${c.start}" title="點擊跳轉至播放器預覽此句">
+            <i class="fa-regular fa-circle-play mr-1 text-[10px]"></i>${formatSecondsToVtt(c.start)}
+          </div>
+          ${i < cues.length - 1 ? `
+            <button
+              type="button"
+              data-merge-cue="${i}"
+              title="合併第 ${i + 1} 句與第 ${i + 2} 句字幕"
+              class="table-merge-btn absolute left-6 -bottom-3 z-20 w-6 h-6 rounded-full bg-white dark:bg-slate-800 text-indigo-600 dark:text-indigo-400 border border-indigo-200 dark:border-indigo-700/80 shadow-md hover:bg-indigo-600 hover:text-white dark:hover:bg-indigo-500 hover:border-indigo-600 flex items-center justify-center text-[10px] cursor-pointer"
+              aria-label="Merge cue ${i + 1} with ${i + 2}"
+            >
+              <i class="fa-solid fa-code-merge pointer-events-none"></i>
+            </button>
+          ` : ''}
         </td>
+
+        <!-- End Time -->
         <td class="p-2 font-mono text-xs text-slate-500 dark:text-slate-400 whitespace-nowrap">${formatSecondsToVtt(c.end)}</td>
+
+        <!-- Subtitle Text Inline Edit -->
         <td class="p-2 text-xs sm:text-sm text-slate-800 dark:text-slate-100">
           <input type="text" data-cue-index="${i}" value="${this.escapeHtml(c.text || '')}" class="w-full bg-transparent border-b border-transparent group-hover:border-slate-300 dark:group-hover:border-slate-700 focus:border-indigo-500 focus:outline-none px-1.5 py-0.5 rounded transition">
+        </td>
+
+        <!-- Floating Delete Button (Hover) -->
+        <td class="p-2 text-center w-10">
+          <button
+            type="button"
+            data-delete-cue="${i}"
+            title="刪除此句字幕"
+            class="opacity-0 group-hover:opacity-100 p-1.5 text-slate-400 hover:text-rose-500 dark:hover:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/40 rounded-lg transition-all active:scale-90 flex items-center justify-center mx-auto"
+            aria-label="Delete cue ${i + 1}"
+          >
+            <i class="fa-solid fa-trash-can text-xs pointer-events-none"></i>
+          </button>
         </td>
       </tr>
     `).join('');
@@ -1099,6 +1150,56 @@ class SubtitleStudioApp {
         }
       });
     });
+
+    // Delete cue
+    this.dom.tableBody.querySelectorAll('[data-delete-cue]').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const idx = parseInt(e.currentTarget.dataset.deleteCue, 10);
+        this.deleteCue(idx);
+      });
+    });
+
+    // Merge cue with next
+    this.dom.tableBody.querySelectorAll('[data-merge-cue]').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const idx = parseInt(e.currentTarget.dataset.mergeCue, 10);
+        this.mergeCueWithNext(idx);
+      });
+    });
+  }
+
+  deleteCue(idx) {
+    if (idx < 0 || idx >= this.state.cues.length) return;
+    this.state.cues.splice(idx, 1);
+    this.rebuildSourceFromCues();
+    toast.show(`已刪除第 ${idx + 1} 句字幕 🗑️`, 'info', 1500);
+  }
+
+  mergeCueWithNext(idx) {
+    const cues = this.state.cues;
+    if (idx < 0 || idx >= cues.length - 1) return;
+    const curr = cues[idx];
+    const next = cues[idx + 1];
+
+    // Combine timestamps: start from curr.start, end at max(curr.end, next.end)
+    curr.end = Math.max(curr.start + 0.1, curr.end, next.end);
+
+    // Combine text contents
+    const t1 = (curr.text || '').trim();
+    const t2 = (next.text || '').trim();
+    if (t1 && t2) {
+      curr.text = `${t1}\n${t2}`;
+    } else {
+      curr.text = t1 || t2 || '';
+    }
+
+    // Remove merged next cue
+    cues.splice(idx + 1, 1);
+
+    this.rebuildSourceFromCues();
+    toast.show(`已合併第 ${idx + 1} 句與第 ${idx + 2} 句字幕 🔗`, 'success', 2000);
   }
 
   rebuildSourceFromCues() {
@@ -1283,6 +1384,93 @@ class SubtitleStudioApp {
       this.dom.mobileOutputPane.classList.add('flex');
       this.switchRightView('player');
     }
+  }
+
+  initSplitter() {
+    const splitter = this.dom.paneSplitter || document.getElementById('paneSplitter');
+    const container = this.dom.workspaceContainer || document.getElementById('workspaceContainer');
+    const leftPane = this.dom.mobileInputPane;
+    const rightPane = this.dom.mobileOutputPane;
+
+    if (!splitter || !container || !leftPane || !rightPane) return;
+
+    let isDragging = false;
+
+    // Load saved split ratio if present
+    const savedSplit = localStorage.getItem('sm_pane_split_pct');
+    if (savedSplit) {
+      const pct = parseFloat(savedSplit);
+      if (!isNaN(pct) && pct >= 20 && pct <= 80) {
+        this.applySplitPercentage(pct);
+      }
+    }
+
+    const onMouseDown = (e) => {
+      if (window.innerWidth < 768) return;
+      isDragging = true;
+      document.body.classList.add('select-none');
+      document.body.style.cursor = 'col-resize';
+      splitter.classList.add('is-dragging');
+      e.preventDefault();
+    };
+
+    const onMouseMove = (e) => {
+      if (!isDragging) return;
+      const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+      const rect = container.getBoundingClientRect();
+      const offset = clientX - rect.left;
+      let pct = (offset / rect.width) * 100;
+
+      // Minimum clamp (keep at least 260px or 20% on each side)
+      const minLeftPct = (260 / rect.width) * 100;
+      const maxLeftPct = ((rect.width - 260) / rect.width) * 100;
+      const minClamp = Math.max(20, minLeftPct);
+      const maxClamp = Math.min(80, maxLeftPct);
+
+      pct = Math.min(Math.max(pct, minClamp), maxClamp);
+      this.applySplitPercentage(pct);
+    };
+
+    const onMouseUp = () => {
+      if (!isDragging) return;
+      isDragging = false;
+      document.body.classList.remove('select-none');
+      document.body.style.cursor = '';
+      splitter.classList.remove('is-dragging');
+      if (leftPane.style.width) {
+        const match = leftPane.style.width.match(/([\d\.]+)%/);
+        if (match) {
+          localStorage.setItem('sm_pane_split_pct', parseFloat(match[1]).toFixed(2));
+        }
+      }
+    };
+
+    const onDblClick = () => {
+      this.applySplitPercentage(50);
+      localStorage.setItem('sm_pane_split_pct', '50.00');
+      toast.show('已重設左右面板寬度為 50:50 ⚖️', 'info', 1200);
+    };
+
+    splitter.addEventListener('mousedown', onMouseDown);
+    splitter.addEventListener('touchstart', onMouseDown, { passive: false });
+    splitter.addEventListener('dblclick', onDblClick);
+
+    window.addEventListener('mousemove', onMouseMove);
+    window.addEventListener('touchmove', onMouseMove, { passive: true });
+    window.addEventListener('mouseup', onMouseUp);
+    window.addEventListener('touchend', onMouseUp);
+  }
+
+  applySplitPercentage(pct) {
+    if (window.innerWidth < 768) {
+      if (this.dom.mobileInputPane) this.dom.mobileInputPane.style.width = '';
+      if (this.dom.mobileOutputPane) this.dom.mobileOutputPane.style.width = '';
+      return;
+    }
+    const leftPct = pct.toFixed(2);
+    const rightPct = (100 - pct).toFixed(2);
+    if (this.dom.mobileInputPane) this.dom.mobileInputPane.style.width = `calc(${leftPct}% - 6px)`;
+    if (this.dom.mobileOutputPane) this.dom.mobileOutputPane.style.width = `calc(${rightPct}% - 6px)`;
   }
 
   escapeHtml(str) {
