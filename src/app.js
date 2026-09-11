@@ -977,7 +977,6 @@ class SubtitleStudioApp {
 
     try {
       await navigator.clipboard.writeText(text);
-      celebration.trigger('✨ 複製成功！ ✨', '字幕內容已成功寫入剪貼簿，立即貼上使用吧！🚀');
       toast.show('已複製到剪貼簿！', 'success');
     } catch (e) {
       this.dom.targetOutput.select();
