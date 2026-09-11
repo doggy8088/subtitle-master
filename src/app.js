@@ -1010,8 +1010,6 @@ class SubtitleStudioApp {
     a.click();
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
-
-    celebration.trigger('🎉 檔案下載成功！', `已為您成功匯出 <strong>${filename}</strong>！✨`);
   }
 
   switchRightView(view) {
